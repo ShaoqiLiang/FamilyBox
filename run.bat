@@ -44,7 +44,11 @@ if /i "%~1"=="debug" (
   )
 ) else if /i "%~1"=="release" (
   set MODE=release
-  if not "%~2"=="" if /i not "%~2"=="headless" set ROMARG=%~2
+  if /i "%~2"=="headless" (
+    set HEADLESS=--headless
+  ) else if not "%~2"=="" (
+    set ROMARG=%~2
+  )
 ) else if not "%~1"=="" (
   if /i not "%~1"=="headless" set ROMARG=%~1
 )

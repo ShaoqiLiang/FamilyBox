@@ -1,5 +1,11 @@
 # FamilyBox C core — links module object libraries into one shared library.
 
+# MinGW latches its default _WIN32_WINNT at the first standard header, which
+# hides GetTickCount64 from fb_debug.h; define it project-wide, before targets.
+if(WIN32)
+  add_compile_definitions(_WIN32_WINNT=0x0600)
+endif()
+
 add_subdirectory(cpu)
 add_subdirectory(ppu)
 add_subdirectory(apu)

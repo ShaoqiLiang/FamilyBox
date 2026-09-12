@@ -217,7 +217,4 @@ void cart_free(Nes* n);
 void controller_write(Nes* n, uint8_t v);
 uint8_t controller_read(Nes* n);
 
-/* nes.c */
-void nes_emulate_frame(Nes* n);
-
 #endif /* NES_INTERNAL_H */

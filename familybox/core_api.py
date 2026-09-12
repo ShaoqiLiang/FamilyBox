@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import sys
 from pathlib import Path
+from typing import Any
 
 _LIB_NAME = (
     "familybox_core.dll"
@@ -39,7 +40,7 @@ class NesCore:
     def __init__(self) -> None:
         if not _LIB_PATH.exists():
             raise FileNotFoundError(
-                f"C core not found: {_LIB_PATH}. Build with core/build.bat or build.sh"
+                f"C core not found: {_LIB_PATH}. Build with familybox\\build.bat (Windows) or familybox/build.sh"
             )
         self._lib = ctypes.CDLL(str(_LIB_PATH))
         lib = self._lib
@@ -71,7 +72,10 @@ class NesCore:
             ctypes.POINTER(ctypes.c_uint8),
         ]
         lib.nes_dump_palette.restype = None
-        lib.nes_dump_palette.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8)]
+        lib.nes_dump_palette.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint8),
+        ]
         lib.nes_peek_ppu.restype = ctypes.c_uint8
         lib.nes_peek_ppu.argtypes = [ctypes.c_void_p, ctypes.c_uint16]
         lib.nes_get_ppuctrl.restype = ctypes.c_uint8
@@ -87,9 +91,16 @@ class NesCore:
         lib.nes_peek_cpu.restype = ctypes.c_uint8
         lib.nes_peek_cpu.argtypes = [ctypes.c_void_p, ctypes.c_uint16]
         lib.nes_ctrl_log.restype = ctypes.c_int
-        lib.nes_ctrl_log.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
+        lib.nes_ctrl_log.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_int,
+        ]
         lib.nes_get_v_samples.restype = None
-        lib.nes_get_v_samples.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint16)]
+        lib.nes_get_v_samples.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint16),
+        ]
         lib.nes_get_t.restype = ctypes.c_uint16
         lib.nes_get_t.argtypes = [ctypes.c_void_p]
         lib.nes_get_s0_hits.restype = ctypes.c_int
@@ -101,7 +112,11 @@ class NesCore:
         lib.nes_get_scroll_writes.restype = ctypes.c_int
         lib.nes_get_scroll_writes.argtypes = [ctypes.c_void_p]
         lib.nes_wrlog_copy.restype = ctypes.c_int
-        lib.nes_wrlog_copy.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_int]
+        lib.nes_wrlog_copy.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_int,
+        ]
         lib.nes_get_nmi_count.restype = ctypes.c_int
         lib.nes_get_nmi_count.argtypes = [ctypes.c_void_p]
         lib.nes_get_last_s0_sl.restype = ctypes.c_int
@@ -220,7 +235,7 @@ class NesCore:
     def last_s0_sl(self) -> int:
         return int(self._lib.nes_get_last_s0_sl(self._handle))
 
-    def wrlog(self) -> list[dict[str, int]]:
+    def wrlog(self) -> list[dict[str, Any]]:
         """Pull recent PPU register writes. kind: 0=ctrl 1=mask 4=$2005 5=$2006 6=$2007."""
         buf = (ctypes.c_uint8 * (128 * 8))()
         n = int(self._lib.nes_wrlog_copy(self._handle, buf, 128))
@@ -245,15 +260,3 @@ class NesCore:
                 }
             )
         return out
-
-    def s0_hits(self) -> int:
-        return int(self._lib.nes_get_s0_hits(self._handle))
-
-    def reset_s0_hits(self) -> None:
-        self._lib.nes_reset_s0_hits(self._handle)
-
-    def debug_enabled(self) -> bool:
-        return bool(self._lib.nes_debug_enabled())
-
-    def scroll_writes(self) -> int:
-        return int(self._lib.nes_get_scroll_writes(self._handle))

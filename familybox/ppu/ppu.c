@@ -239,16 +239,20 @@ int ppu_step(Nes* n, int ppu_dots) {
             p->render_v = p->v;
         }
 
+        int rendering = (p->mask & 0x18) != 0;
+
         if (visible && p->cycle == 256) {
             render_scanline(n, p->scanline);
-            inc_vert(n);
+            if (rendering) {
+                inc_vert(n);
+            }
         }
 
-        if ((visible || prerender) && p->cycle == 257) {
+        if ((visible || prerender) && p->cycle == 257 && rendering) {
             copy_hori(n);
         }
 
-        if (prerender && p->cycle >= 280 && p->cycle <= 304) {
+        if (prerender && p->cycle >= 280 && p->cycle <= 304 && rendering) {
             copy_vert(n);
         }
 

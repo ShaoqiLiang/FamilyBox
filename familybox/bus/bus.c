@@ -172,11 +172,11 @@ static int mirror_nt(Nes* n, uint16_t addr) {
     int table = a / 0x400; /* 0..3 */
     int offset = a % 0x400;
     if (n->ppu_mem.mirroring == 1) {
-        /* Vertical mirroring: $2000=$2400, $2800=$2C00 */
-        return ((table >> 1) * 0x400) + offset;
+        /* Vertical mirroring (iNES flag=1): $2000=$2800, $2400=$2C00 */
+        return ((table & 1) * 0x400) + offset;
     }
-    /* Horizontal mirroring: $2000=$2800, $2400=$2C00 */
-    return ((table & 1) * 0x400) + offset;
+    /* Horizontal mirroring (flag=0): $2000=$2400, $2800=$2C00 */
+    return ((table >> 1) * 0x400) + offset;
 }
 
 static int mirror_pal(int addr) {
