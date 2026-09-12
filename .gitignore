@@ -72,6 +72,7 @@ build/
 
 # Claude (if you use it)
 .claude/
+.claude/*
 
 # ROM files (optional - if you have test ROMs, consider .gitignoring specific ones)
 # ROM 文件夹及所有内容
@@ -93,3 +94,12 @@ build/
 *.tmp
 *.temp
 *.cache
+
+AGENTS.md
+# smb-assembler 参考仓库（含 Nintendo 版权 ROM mario.nes，禁止入库）
+doc/smb-assembler-master/
+doc/smb-assembler-master.zip
+doc/reference/
+
+# 本地测试用 NTSC 卡带副本（ROM 不入库）
+rom/super-mario-bros-ntsc.nes

@@ -1,157 +1,214 @@
-"""Tests for the NES system top-level module."""
+"""Tests for the NES pygame shell over the C core."""
 
-import pytest
+from __future__ import annotations
+
+from collections.abc import Generator
 
 import pygame
+import pytest
 
 from familybox.nes import NES
 
-
-ROM_PATH: str = "rom/super-mario-bros.nes"
+ROM_PATH = "rom/super-mario-bros.nes"
 
 
 @pytest.fixture()
-def nes_instance() -> NES:
-    """Create a headless NES instance with Super Mario Bros ROM."""
-    return NES(ROM_PATH, headless=True)
+def nes() -> Generator[NES, None, None]:
+    n = NES(ROM_PATH, headless=True)
+    yield n
+    n.close()
 
 
 class TestNESInit:
-    """T-NES-01 / T-NES-02: NES initialisation and component assembly."""
+    def test_load_rom_succeeds(self, nes: NES) -> None:
+        assert nes._core is not None
 
-    def test_load_rom_succeeds(self) -> None:
-        """NES should load a valid ROM without error."""
-        nes = NES(ROM_PATH, headless=True)
-        assert nes._header is not None
-        assert nes._mapper is not None
+    def test_headless_no_pygame_display(self, nes: NES) -> None:
+        assert nes._screen is None
 
-    def test_components_created(self) -> None:
-        """All internal components should be created."""
-        nes = NES(ROM_PATH, headless=True)
-        assert nes._cpu is not None
-        assert nes._ppu is not None
-        assert nes._apu is not None
-        assert nes._controller is not None
-        assert nes._cpu_bus is not None
-        assert nes._ppu_bus is not None
+    def test_reset_succeeds(self, nes: NES) -> None:
+        nes.reset()
+        nes.reset()
 
-    def test_headless_no_pygame_display(self) -> None:
-        """Headless mode should not create pygame display objects."""
-        nes = NES(ROM_PATH, headless=True)
-        assert not hasattr(nes, "_screen") or nes._screen is None
-        assert not hasattr(nes, "_clock") or nes._clock is None
-
-    def test_running_flag_default(self) -> None:
-        """The _running flag should be True after init."""
-        nes = NES(ROM_PATH, headless=True)
-        assert nes._running is True
+    def test_run_frame_succeeds(self, nes: NES) -> None:
+        nes.reset()
+        nes._run_frame()
+        assert nes._last_rgb
+        assert len(nes._last_rgb) == 256 * 240 * 3
 
 
-class TestNESReset:
-    """T-NES-04: System reset."""
+class TestKeyMapping:
+    def test_handle_key_a(self, nes: NES) -> None:
+        nes._handle_key(pygame.K_z, True)
+        assert nes._buttons & 0x01
+        nes._handle_key(pygame.K_z, False)
+        assert not (nes._buttons & 0x01)
 
-    def test_reset_succeeds(self, nes_instance: NES) -> None:
-        """Reset should complete without error."""
-        nes_instance.reset()
-
-    def test_reset_multiple_times(self, nes_instance: NES) -> None:
-        """Calling reset multiple times should not raise."""
-        nes_instance.reset()
-        nes_instance.reset()
-        nes_instance.reset()
+    def test_handle_key_unmapped(self, nes: NES) -> None:
+        nes._handle_key(ord("q"), True)
+        assert nes._buttons == 0
 
 
-class TestNESFrame:
-    """T-NES-05 .. T-NES-08: Frame execution."""
-
-    def test_run_frame_succeeds(self, nes_instance: NES) -> None:
-        """Executing one frame should complete without error."""
-        nes_instance.reset()
-        nes_instance._run_frame()
-
-    def test_framebuffer_non_empty(self, nes_instance: NES) -> None:
-        """After enabling rendering and running one frame, the framebuffer
-        should contain non-zero pixel data."""
-        nes_instance.reset()
-        # Enable background rendering via PPUMASK ($2001)
-        nes_instance._ppu.write_register(0x2001, 0x08)
-        nes_instance._run_frame()
-        framebuffer = nes_instance._ppu._renderer.get_framebuffer()
-        assert len(framebuffer) == 256 * 240
-        assert any(pixel != 0 for pixel in framebuffer)
-
-    def test_framebuffer_size(self, nes_instance: NES) -> None:
-        """The framebuffer should be 256*240 pixels."""
-        nes_instance.reset()
-        nes_instance._run_frame()
-        framebuffer = nes_instance._ppu._renderer.get_framebuffer()
-        assert len(framebuffer) == 256 * 240
+@pytest.fixture()
+def windowed_nes(monkeypatch: pytest.MonkeyPatch) -> Generator[NES, None, None]:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    monkeypatch.setenv("SDL_AUDIODRIVER", "dummy")
+    pygame.init()
+    n = NES(ROM_PATH, headless=False)
+    yield n
+    n.close()
 
 
-class TestNESKeyMapping:
-    """T-NES-09 / T-NES-10: Keyboard event handling and key mapping."""
+class TestWindowMaximize:
+    def test_default_small_window(self, windowed_nes: NES) -> None:
+        assert windowed_nes._screen is not None
+        assert windowed_nes._screen.get_size() == (1024, 768)
+        assert not windowed_nes._maximized
 
-    def test_handle_key_a(self, nes_instance: NES) -> None:
-        """Z key maps to NESButton.A."""
-        nes_instance._handle_key(pygame.K_z, True)
-        controller = nes_instance._controller
-        # Read button state via the shift register
-        controller.write(0x01)
-        controller.write(0x00)
-        assert controller.read() == 1  # A pressed
+    def test_maximize_is_borderless_fullscreen(self, windowed_nes: NES) -> None:
+        pygame.event.post(pygame.event.Event(pygame.WINDOWMAXIMIZED))
+        windowed_nes._handle_events()
+        assert windowed_nes._maximized
+        assert windowed_nes._screen is not None
+        assert windowed_nes._screen.get_size() == pygame.display.get_desktop_sizes()[0]
+        assert windowed_nes._screen.get_flags() & pygame.NOFRAME
 
-    def test_handle_key_b(self, nes_instance: NES) -> None:
-        """X key maps to NESButton.B."""
-        nes_instance._handle_key(pygame.K_x, True)
-        controller = nes_instance._controller
-        controller.write(0x01)
-        controller.write(0x00)
-        controller.read()  # skip A
-        assert controller.read() == 1  # B pressed
+    def test_esc_restores_small_window(self, windowed_nes: NES) -> None:
+        pygame.event.post(pygame.event.Event(pygame.WINDOWMAXIMIZED))
+        windowed_nes._handle_events()
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        windowed_nes._handle_events()
+        assert windowed_nes._screen is not None
+        assert windowed_nes._screen.get_size() == (1024, 768)
+        assert windowed_nes._screen.get_flags() & pygame.RESIZABLE
+        assert not windowed_nes._maximized
 
-    def test_handle_key_start(self, nes_instance: NES) -> None:
-        """Enter key maps to NESButton.START."""
-        nes_instance._handle_key(pygame.K_RETURN, True)
-        controller = nes_instance._controller
-        controller.write(0x01)
-        controller.write(0x00)
-        for _ in range(3):
-            controller.read()  # skip A, B, Select
-        assert controller.read() == 1  # Start pressed
+    def test_present_works_in_maximized_mode(self, windowed_nes: NES) -> None:
+        windowed_nes.reset()
+        windowed_nes._run_frame()
+        pygame.event.post(pygame.event.Event(pygame.WINDOWMAXIMIZED))
+        windowed_nes._handle_events()
+        windowed_nes._present()  # scaled blit must not raise
 
-    def test_handle_key_select(self, nes_instance: NES) -> None:
-        """Right Shift maps to NESButton.SELECT."""
-        nes_instance._handle_key(pygame.K_RSHIFT, True)
-        controller = nes_instance._controller
-        controller.write(0x01)
-        controller.write(0x00)
-        for _ in range(2):
-            controller.read()  # skip A, B
-        assert controller.read() == 1  # Select pressed
+    def test_focus_lost_clears_buttons(self, windowed_nes: NES) -> None:
+        windowed_nes._handle_key(pygame.K_RIGHT, True)
+        assert windowed_nes._buttons == 0x80
+        pygame.event.post(pygame.event.Event(pygame.WINDOWFOCUSLOST))
+        windowed_nes._handle_events()
+        assert windowed_nes._buttons == 0
 
-    def test_handle_key_directions(self, nes_instance: NES) -> None:
-        """Arrow keys map to directional buttons."""
-        nes_instance._handle_key(pygame.K_UP, True)
-        controller = nes_instance._controller
-        controller.write(0x01)
-        controller.write(0x00)
-        for _ in range(4):
-            controller.read()  # skip A, B, Select, Start
-        assert controller.read() == 1  # Up pressed
 
-    def test_handle_key_release(self, nes_instance: NES) -> None:
-        """Releasing a key should clear the button state."""
-        nes_instance._handle_key(pygame.K_z, True)
-        nes_instance._handle_key(pygame.K_z, False)
-        controller = nes_instance._controller
-        controller.write(0x01)
-        controller.write(0x00)
-        assert controller.read() == 0  # A released
+class _FakeChannel:
+    """Records play/queue calls; get_busy scriptable."""
 
-    def test_handle_key_unmapped(self, nes_instance: NES) -> None:
-        """Unmapped keys should not affect controller state."""
-        nes_instance._handle_key(pygame.K_q, True)
-        controller = nes_instance._controller
-        controller.write(0x01)
-        controller.write(0x00)
-        assert controller.read() == 0  # nothing pressed
+    def __init__(self) -> None:
+        self.played: list[object] = []
+        self.queued: list[object] = []
+
+    def play(self, snd: object) -> None:
+        self.played.append(snd)
+
+    def queue(self, snd: object) -> None:
+        self.queued.append(snd)
+
+    def get_busy(self) -> bool:
+        return bool(self.played or self.queued)
+
+
+class _FakeSound:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+
+
+def _frame_pcm() -> bytes:
+    # One core frame: ~733.75 -> 734 samples, mono s16 (1468 bytes)
+    return b"\x00\x01" * 734
+
+
+class TestAudioPump:
+    FRAME = 734  # mono samples per core frame
+
+    def _pump(self, channels: int = 1) -> tuple[object, _FakeChannel, list[bytes]]:
+        from familybox.nes import _AudioPump
+
+        ch = _FakeChannel()
+        data: list[bytes] = []
+
+        def factory(d: bytes) -> _FakeSound:
+            data.append(d)
+            return _FakeSound(d)
+
+        return _AudioPump(ch, channels=channels, sound_factory=factory), ch, data
+
+    def test_primes_before_first_play(self) -> None:
+        pump, ch, _ = self._pump()
+        for i in range(pump.PRIME // self.FRAME):  # one frame short of PRIME
+            pump.push(_frame_pcm(), now=i * self.FRAME / 44100)
+        assert ch.played == [] and ch.queued == []
+
+    def test_primes_then_plays_not_queues(self) -> None:
+        pump, ch, _ = self._pump()
+        t = 0.0
+        for i in range((pump.PRIME + self.FRAME - 1) // self.FRAME):
+            pump.push(_frame_pcm(), now=t)
+            t += self.FRAME / 44100
+        assert len(ch.played) == 1 and ch.queued == []
+
+    def test_steady_state_nothing_lost(self) -> None:
+        pump, ch, data = self._pump()
+        t = 0.0
+        n = 600  # ~10 s at 60.0988 fps
+        for _ in range(n):
+            pump.push(_frame_pcm(), now=t)
+            t += self.FRAME / 44100
+        assert len(ch.played) == 1
+        assert 50 <= len(ch.queued) <= 75  # ~one queue per 160 ms chunk
+        enqueued = sum(len(d) for d in data) // 2  # mono samples sent
+        pushed = n * self.FRAME
+        backlog, pending = pump.stats(t)
+        assert enqueued + pending == pushed  # no samples dropped
+        assert 0 <= backlog <= 2 * pump.CHUNK + self.FRAME
+
+    def test_fast_loop_slot_protocol(self) -> None:
+        pump, ch, _ = self._pump()
+        for _ in range(10):
+            pump.push(_frame_pcm(), now=0.0)  # all pushes at the same instant
+        # one chunk playing + at most one queued; the rest waits in pending
+        assert len(ch.played) == 1
+        assert len(ch.queued) <= 1
+        assert pump.stats(0.0)[1] > 0
+        assert pump.stats(0.0)[1] <= pump.MAX_PENDING // 2 + self.FRAME
+
+    def test_stereo_conversion_interleaves(self) -> None:
+        pump, ch, data = self._pump(channels=2)
+        t = 0.0
+        for _ in range((pump.PRIME + self.FRAME - 1) // self.FRAME + 2):
+            pump.push(_frame_pcm(), now=t)
+            t += self.FRAME / 44100
+        assert len(data) == 1
+        assert len(data[0]) == pump.CHUNK * 4  # duplicated to stereo
+        mono = (_frame_pcm() * 10)[: pump.CHUNK * 2]
+        expect = bytearray()
+        for k in range(0, len(mono), 2):
+            expect += mono[k : k + 2] * 2
+        assert data[0] == bytes(expect)
+
+    def test_starvation_resyncs_and_reprimes(self) -> None:
+        pump, ch, _ = self._pump()
+        t = 0.0
+        for _ in range(20):  # steady flow
+            pump.push(_frame_pcm(), now=t)
+            t += self.FRAME / 44100
+        plays_before = len(ch.played)
+        queues_before = len(ch.queued)
+        t += 1.0  # long stall: mixer starved far past everything queued
+        pump.push(_frame_pcm(), now=t)  # triggers resync
+        # push until the pump re-primes and plays again; note pending may
+        # hold leftovers from before the stall, so PRIME completes early
+        for _ in range(20):
+            t += self.FRAME / 44100
+            pump.push(_frame_pcm(), now=t)
+            if len(ch.played) > plays_before:
+                break
+        assert len(ch.played) == plays_before + 1  # re-prime uses play()
+        assert len(ch.queued) == queues_before  # and never queue()

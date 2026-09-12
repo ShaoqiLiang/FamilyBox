@@ -8,10 +8,11 @@ from familybox.main import parse_args
 class TestParseArgs:
     """Command-line argument parsing tests."""
 
-    def test_rom_path_required(self) -> None:
-        """ROM path is required."""
-        with pytest.raises(SystemExit):
-            parse_args([])
+    def test_rom_defaults_to_bundled(self) -> None:
+        """No args: uses bundled super-mario-bros.nes if present."""
+        args = parse_args([])
+        assert args.rom is not None
+        assert args.rom.endswith("super-mario-bros.nes")
 
     def test_rom_path(self) -> None:
         """ROM path is parsed correctly."""

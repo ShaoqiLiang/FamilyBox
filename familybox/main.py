@@ -9,8 +9,24 @@
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from familybox.nes import NES
+
+
+def _default_rom() -> str | None:
+    """Bundled ROM next to the package / in PyInstaller _MEIPASS."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        candidates.append(base / "rom" / "super-mario-bros.nes")
+        candidates.append(Path(sys.executable).parent / "rom" / "super-mario-bros.nes")
+    here = Path(__file__).resolve().parent.parent
+    candidates.append(here / "rom" / "super-mario-bros.nes")
+    for p in candidates:
+        if p.is_file():
+            return str(p)
+    return None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -20,7 +36,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "rom",
-        help="Path to .nes ROM file",
+        nargs="?",
+        default=None,
+        help="Path to .nes ROM file (default: bundled super-mario-bros.nes)",
     )
     parser.add_argument(
         "--headless",
@@ -33,7 +51,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level (default: WARNING)",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.rom is None:
+        args.rom = _default_rom()
+        if args.rom is None:
+            parser.error("No ROM given and bundled super-mario-bros.nes not found")
+    return args
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -44,18 +67,46 @@ def main(argv: list[str] | None = None) -> None:
         level=getattr(logging, args.log_level),
         format="%(levelname)s:%(name)s:%(message)s",
     )
+    from familybox.core_api import NesCore, _LIB_PATH
+    from familybox.nes import _debug_on
 
+    # Always show build flavour so it's obvious which DLL is loaded
+    try:
+        probe = NesCore()
+        c_debug = bool(probe.debug_enabled())
+        probe.close()
+    except Exception:
+        c_debug = False
+    py_debug = _debug_on()
+    mode = "DEBUG" if (c_debug or py_debug) else "RELEASE"
+    print("=" * 48, flush=True)
+    print(f"  FamilyBox  mode={mode}", flush=True)
+    print(f"  C core debug : {c_debug}", flush=True)
+    print(f"  Python debug : {py_debug}", flush=True)
+    print(f"  DLL          : {_LIB_PATH}", flush=True)
+    print(f"  ROM          : {args.rom}", flush=True)
+    print("  JUMP = Space / Z / N / J     RUN = M / K", flush=True)
+    print("  MAXIMIZE = title-bar button; ESC = restore small window", flush=True)
+    print("  START = Enter / Tab          SELECT = Shift", flush=True)
+    print("  MOVE = Arrows or WASD", flush=True)
+    print("=" * 48, flush=True)
+    logging.getLogger(__name__).info("DLL: %s mode=%s", _LIB_PATH, mode)
+
+    nes = None
     try:
         nes = NES(args.rom, headless=args.headless)
         nes.run()
-    except FileNotFoundError:
-        print(f"Error: ROM file not found: {args.rom}", file=sys.stderr)
+    except FileNotFoundError as e:
+        print(f"Error: ROM file not found: {e}", file=sys.stderr)
         sys.exit(1)
     except ValueError as e:
         print(f"Error: Invalid ROM file: {e}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
         print("\nExiting...")
+    finally:
+        if nes is not None:
+            nes.close()
 
 
 if __name__ == "__main__":
