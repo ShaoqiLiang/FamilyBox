@@ -5,13 +5,131 @@ from __future__ import annotations
 import logging
 import os
 import time
+from array import array
+from collections import deque
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pygame
 
 from familybox.core_api import NesCore, _LIB_PATH
 
 log = logging.getLogger(__name__)
+
+SoundFactory = Callable[[bytes], Any]
+
+
+class _AudioPump:
+    """Streams core PCM to the mixer on the audio clock.
+
+    Two hardware facts shape this pump:
+    - pygame-ce may open the mixer as stereo even when channels=1 is
+      requested (get_init() is authoritative), so mono core samples must be
+      duplicated to L/R before reaching Sound.
+    - Channel.queue() is a ONE-DEEP slot: queueing again REPLACES the sound
+      still waiting, discarding it. So the mixer can hold at most two chunks
+      (playing + queued) and a new queue() is only issued once the previously
+      queued chunk has started playing. That moment is tracked with our own
+      audio-clock bookkeeping (consumed = elapsed * SR since playback start),
+      not with get_busy(), which flickers at chunk boundaries.
+
+    Chunks are ~160 ms so normal Python/OS jitter never empties the mixer.
+    """
+
+    SR = 44100
+    CHUNK = SR * 160 // 1000  # mono samples per Sound (~160 ms)
+    PRIME = SR * 160 // 1000  # accumulate this much before starting playback
+    MAX_PENDING = SR * 2 // 5  # trim unqueued backlog beyond ~0.4 s
+    RESYNC_SLACK = SR // 10  # starved this deep for this long -> re-prime
+    # Fallback slot margin for channels without get_queue(): SDL consumes in
+    # buffer-sized quanta, so the wall-clock estimate can run ahead of the
+    # mixer by about one buffer. Queueing before the previously queued chunk
+    # actually STARTED would REPLACE (drop) it.
+    SLOT_MARGIN = SR * 50 // 1000
+
+    def __init__(
+        self,
+        channel: Any,
+        channels: int = 1,
+        sound_factory: SoundFactory | None = None,
+    ) -> None:
+        self._channel = channel
+        self._channels = channels
+        if sound_factory is None:
+
+            def sound_factory(data: bytes) -> Any:
+                return pygame.mixer.Sound(buffer=data)
+
+        self._make_sound = sound_factory
+        self._pending = bytearray()
+        self._t0: float | None = None  # playback start (first chunk played)
+        self._enqueued = 0  # mono samples handed to the mixer
+        self._last_dur = 0  # duration of the most recent chunk
+        self._refs: deque[Any] = deque(maxlen=8)
+
+    def _to_mixer(self, data: bytes) -> bytes:
+        if self._channels == 1:
+            return data
+        a = array("h")
+        a.frombytes(data)
+        out = array("h", bytes(len(a) * 4))
+        out[0::2] = a
+        out[1::2] = a
+        return out.tobytes()
+
+    def _slot_free(self, consumed: float) -> bool:
+        """True when the one-deep queue slot is free for a new chunk."""
+        get_queue = getattr(self._channel, "get_queue", None)
+        if get_queue is not None:
+            try:
+                return get_queue() is None
+            except pygame.error:
+                pass
+        return consumed >= self._enqueued - self._last_dur + self.SLOT_MARGIN
+
+    def push(self, pcm: bytes, now: float) -> None:
+        self._pending += pcm
+        if self._t0 is not None:
+            consumed = (now - self._t0) * self.SR
+            if consumed > self._enqueued + self.RESYNC_SLACK:
+                # Starved far past everything we queued (long stall): drop
+                # the clock and re-prime so the cushion rebuilds.
+                self._t0 = None
+                self._enqueued = 0
+                self._last_dur = 0
+        while self._pending:
+            dur = min(len(self._pending) // 2, self.CHUNK)
+            if self._t0 is None:
+                if dur < self.PRIME:
+                    break  # still priming
+            else:
+                consumed = (now - self._t0) * self.SR
+                if not self._slot_free(consumed):
+                    break  # one-deep queue slot still occupied
+                if consumed <= self._enqueued and dur < self.CHUNK:
+                    break  # not starving: hold back for a full chunk
+            data = bytes(self._pending[: dur * 2])
+            del self._pending[: dur * 2]
+            snd = self._make_sound(self._to_mixer(data))
+            if self._t0 is None:
+                self._channel.play(snd)
+                self._t0 = now
+            else:
+                self._channel.queue(snd)
+            self._refs.append(snd)
+            self._enqueued += dur
+            self._last_dur = dur
+        if len(self._pending) > self.MAX_PENDING:
+            del self._pending[: len(self._pending) - self.MAX_PENDING]
+
+    def stats(self, now: float) -> tuple[int, int]:
+        """(estimated unstarted backlog in samples, pending samples)."""
+        if self._t0 is None:
+            return 0, len(self._pending) // 2
+        consumed = (now - self._t0) * self.SR
+        return int(self._enqueued - consumed), len(self._pending) // 2
+
 
 # Same 64-entry table as familybox/ppu — for debug RGB printout only
 _NES_RGB = [
@@ -146,6 +264,7 @@ class NES:
         self._screen: pygame.Surface | None = None
         self._clock: pygame.time.Clock | None = None
         self._channel = None
+        self._pump: _AudioPump | None = None
         self._maximized = False
 
         if not headless:
@@ -156,6 +275,17 @@ class NES:
             try:
                 pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=1024)
                 self._channel = pygame.mixer.Channel(0)
+                init = pygame.mixer.get_init()
+                assert init is not None
+                freq, _size, out_ch = init
+                if freq != 44100:
+                    log.warning(
+                        "Mixer opened at %d Hz, core emits 44100 Hz — pitch will drift",
+                        freq,
+                    )
+                if out_ch != 1:
+                    log.info("Mixer opened as %d-channel; pump duplicates mono", out_ch)
+                self._pump = _AudioPump(self._channel, channels=out_ch)
             except pygame.error as e:
                 log.warning("Audio init failed: %s", e)
 
@@ -204,7 +334,9 @@ class NES:
                 self._handle_events()
                 self._present()
                 assert self._clock is not None
-                self._clock.tick(60)
+                # Native core rate; tick(60) underfeeds the mixer by ~0.16%,
+                # which drains the audio queue and crackles the stream.
+                self._clock.tick(60.0988)
 
     def _debug_dump(self) -> None:
         c = self._core
@@ -279,12 +411,11 @@ class NES:
         self._frame_no += 1
         if self._debug and self._frame_no % 60 == 0:
             self._debug_dump()
-        if pcm and self._channel is not None:
+        if pcm and self._pump is not None:
             try:
-                snd = pygame.mixer.Sound(buffer=pcm)
-                self._channel.queue(snd)
-            except pygame.error:
-                pass
+                self._pump.push(pcm, time.perf_counter())
+            except pygame.error as e:
+                log.warning("Audio pump failed: %s", e)
 
     def _handle_events(self) -> None:
         for event in pygame.event.get():

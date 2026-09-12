@@ -79,7 +79,7 @@ static void pulse_half(PulseCh* c) {
         int change = c->timer_period >> c->sweep_shift;
         if (c->sweep_negate) c->timer_period = c->timer_period - change;
         else c->timer_period = c->timer_period + change;
-        if (c->timer_period > 0x7FF) c->timer_period &= 0x7FF;
+        /* Oversize periods mute the channel on real hardware; do not wrap. */
     }
     if (c->sweep_divider == 0 || c->sweep_reload) {
         c->sweep_divider = c->sweep_period;
@@ -91,20 +91,23 @@ static void pulse_half(PulseCh* c) {
 
 static int pulse_out(PulseCh* c) {
     if (!c->enabled || c->length_counter == 0) return 0;
-    if (c->timer_period < 8) return 0;
+    if (c->timer_period < 8 || c->timer_period > 0x7FF) return 0;
     int env = c->constant_volume ? c->volume : c->envelope_decay;
     return DUTY_TABLE[c->duty][c->duty_index] ? env : 0;
 }
 
+/* The waveform timers are clocked on the APU clock (CPU/2), so each timer
+   step lasts (period + 1) * 2 CPU cycles. The channel state stores CPU
+   cycles remaining until the next step fires. */
 static void pulse_tick_timer(PulseCh* c, int cycles) {
     int remaining = cycles;
     while (remaining > 0) {
-        if (c->timer >= remaining) {
+        if (c->timer > remaining) {
             c->timer -= remaining;
             break;
         }
-        remaining -= c->timer + 1;
-        c->timer = c->timer_period;
+        remaining -= c->timer;
+        c->timer = (c->timer_period + 1) * 2;
         c->duty_index = (c->duty_index + 1) & 7;
     }
 }
@@ -112,12 +115,12 @@ static void pulse_tick_timer(PulseCh* c, int cycles) {
 static void tri_tick_timer(TriangleCh* t, int cycles) {
     int remaining = cycles;
     while (remaining > 0) {
-        if (t->timer >= remaining) {
+        if (t->timer > remaining) {
             t->timer -= remaining;
             break;
         }
-        remaining -= t->timer + 1;
-        t->timer = t->timer_period;
+        remaining -= t->timer;
+        t->timer = (t->timer_period + 1) * 2;
         if (t->length_counter > 0 && t->linear_counter > 0) {
             t->sequence_index = (t->sequence_index + 1) & 31;
         }
@@ -127,12 +130,12 @@ static void tri_tick_timer(TriangleCh* t, int cycles) {
 static void noise_tick_timer(NoiseCh* nch, int cycles) {
     int remaining = cycles;
     while (remaining > 0) {
-        if (nch->timer >= remaining) {
+        if (nch->timer > remaining) {
             nch->timer -= remaining;
             break;
         }
-        remaining -= nch->timer + 1;
-        nch->timer = nch->timer_period;
+        remaining -= nch->timer;
+        nch->timer = (nch->timer_period + 1) * 2;
         int bit0 = nch->shift_reg & 1;
         int bit1 = (nch->shift_reg >> (nch->mode ? 6 : 1)) & 1;
         int fb = bit0 ^ bit1;
