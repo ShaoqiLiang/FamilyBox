@@ -104,7 +104,6 @@ _KEY_MAP = {
     pygame.K_n: 0x01,
     pygame.K_j: 0x01,
     pygame.K_SPACE: 0x01,  # jump
-    pygame.K_x: 0x02,
     pygame.K_m: 0x02,
     pygame.K_k: 0x02,
     # Select / Start
@@ -147,10 +146,11 @@ class NES:
         self._screen: pygame.Surface | None = None
         self._clock: pygame.time.Clock | None = None
         self._channel = None
+        self._maximized = False
 
         if not headless:
             pygame.init()
-            self._screen = pygame.display.set_mode((256, 240))
+            self._screen = pygame.display.set_mode((256, 240), pygame.RESIZABLE)
             pygame.display.set_caption("FamilyBox -Auth:ShaoqiLiang")
             self._clock = pygame.time.Clock()
             try:
@@ -158,12 +158,6 @@ class NES:
                 self._channel = pygame.mixer.Channel(0)
             except pygame.error as e:
                 log.warning("Audio init failed: %s", e)
-
-        self._surface: pygame.Surface | None = None
-        if not headless:
-            self._surface = pygame.image.frombuffer(
-                bytes(256 * 240 * 3), (256, 240), "RGB"
-            )
 
     def _open_run_log(self, mode: str, rom_path: str) -> Path | None:
         """Append-only log under build/log. Always created so runs are comparable."""
@@ -297,9 +291,19 @@ class NES:
             if event.type == pygame.QUIT:
                 self._running = False
             elif event.type == pygame.KEYDOWN:
-                self._handle_key(event.key, True)
+                if event.key == pygame.K_ESCAPE:
+                    self._restore_window()
+                else:
+                    self._handle_key(event.key, True)
             elif event.type == pygame.KEYUP:
                 self._handle_key(event.key, False)
+            elif event.type == pygame.WINDOWMAXIMIZED:
+                self._enter_maximized()
+            elif event.type in (pygame.WINDOWFOCUSLOST, pygame.WINDOWMINIMIZED):
+                # While unfocused/minimized, KEYUP events are missed — release
+                # everything so no direction/fire bit gets stuck.
+                self._buttons = 0
+                self._core.set_buttons(0)
 
     def _handle_key(self, key: int, pressed: bool) -> None:
         bit = _KEY_MAP.get(key)
@@ -315,9 +319,41 @@ class NES:
         rgb = getattr(self, "_last_rgb", None)
         if not rgb or self._screen is None:
             return
-        surf = pygame.image.frombuffer(rgb, (256, 240), "RGB")
-        self._screen.blit(surf, (0, 0))
+        frame = pygame.image.frombuffer(rgb, (256, 240), "RGB")
+        win_w, win_h = self._screen.get_size()
+        if (win_w, win_h) == (256, 240):
+            self._screen.blit(frame, (0, 0))
+        else:
+            # Integer-scale with letterbox bars: pixel-perfect at any size.
+            scale = max(1, min(win_w // 256, win_h // 240))
+            w, h = 256 * scale, 240 * scale
+            self._screen.fill((0, 0, 0))
+            self._screen.blit(
+                pygame.transform.scale(frame, (w, h)),
+                ((win_w - w) // 2, (win_h - h) // 2),
+            )
         pygame.display.flip()
+
+    def _enter_maximized(self) -> None:
+        """Maximize button clicked: borderless window filling the desktop."""
+        if self._headless or self._maximized:
+            return
+        desktop = pygame.display.get_desktop_sizes()[0]
+        # set_mode() reuses the existing window and ignores changed window
+        # flags, so recreate the display to drop the title bar.
+        pygame.display.quit()
+        pygame.display.init()
+        self._screen = pygame.display.set_mode(desktop, pygame.NOFRAME)
+        self._maximized = True
+
+    def _restore_window(self) -> None:
+        """ESC in maximized mode: back to the small titled window."""
+        if self._headless or not self._maximized:
+            return
+        pygame.display.quit()
+        pygame.display.init()
+        self._screen = pygame.display.set_mode((256, 240), pygame.RESIZABLE)
+        self._maximized = False
 
     def close(self) -> None:
         self._core.close()
