@@ -72,6 +72,7 @@ build/
 
 # Claude (if you use it)
 .claude/
+.claude/*
 
 # ROM files (optional - if you have test ROMs, consider .gitignoring specific ones)
 # ROM 文件夹及所有内容
@@ -93,3 +94,5 @@ build/
 *.tmp
 *.temp
 *.cache
+
+AGENTS.md
