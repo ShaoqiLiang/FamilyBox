@@ -17,6 +17,11 @@ from familybox.core_api import NesCore, _LIB_PATH
 
 log = logging.getLogger(__name__)
 
+# Default titled-window size; the frame is integer-scaled inside it.
+_WINDOW_SIZE = (1024, 768)
+# Native NES frame size (never scaled by user settings).
+_FRAME_SIZE = (256, 240)
+
 SoundFactory = Callable[[bytes], Any]
 
 
@@ -269,7 +274,7 @@ class NES:
 
         if not headless:
             pygame.init()
-            self._screen = pygame.display.set_mode((256, 240), pygame.RESIZABLE)
+            self._screen = pygame.display.set_mode(_WINDOW_SIZE, pygame.RESIZABLE)
             pygame.display.set_caption("FamilyBox -Auth:ShaoqiLiang")
             self._clock = pygame.time.Clock()
             try:
@@ -450,14 +455,15 @@ class NES:
         rgb = getattr(self, "_last_rgb", None)
         if not rgb or self._screen is None:
             return
-        frame = pygame.image.frombuffer(rgb, (256, 240), "RGB")
+        frame = pygame.image.frombuffer(rgb, _FRAME_SIZE, "RGB")
         win_w, win_h = self._screen.get_size()
-        if (win_w, win_h) == (256, 240):
+        if (win_w, win_h) == _FRAME_SIZE:
             self._screen.blit(frame, (0, 0))
         else:
             # Integer-scale with letterbox bars: pixel-perfect at any size.
-            scale = max(1, min(win_w // 256, win_h // 240))
-            w, h = 256 * scale, 240 * scale
+            fw, fh = _FRAME_SIZE
+            scale = max(1, min(win_w // fw, win_h // fh))
+            w, h = fw * scale, fh * scale
             self._screen.fill((0, 0, 0))
             self._screen.blit(
                 pygame.transform.scale(frame, (w, h)),
@@ -483,7 +489,7 @@ class NES:
             return
         pygame.display.quit()
         pygame.display.init()
-        self._screen = pygame.display.set_mode((256, 240), pygame.RESIZABLE)
+        self._screen = pygame.display.set_mode(_WINDOW_SIZE, pygame.RESIZABLE)
         self._maximized = False
 
     def close(self) -> None:

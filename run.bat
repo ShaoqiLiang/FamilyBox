@@ -20,7 +20,8 @@ rem Exit code: 0 = ok, 1 = build or run failed.
 set MODE=release
 set TRACE=0
 set HEADLESS=
-set ROMARG=rom\super-mario-bros.nes
+rem Default cartridge: verified NTSC original (PAL EU copy kept at rom\super-mario-bros.nes)
+set ROMARG=rom\super-mario-bros-ntsc.nes
 
 if /i "%~1"=="headless" (
   set HEADLESS=--headless

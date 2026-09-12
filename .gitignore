@@ -100,3 +100,6 @@ AGENTS.md
 doc/smb-assembler-master/
 doc/smb-assembler-master.zip
 doc/reference/
+
+# 本地测试用 NTSC 卡带副本（ROM 不入库）
+rom/super-mario-bros-ntsc.nes

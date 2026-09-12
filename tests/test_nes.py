@@ -62,7 +62,7 @@ def windowed_nes(monkeypatch: pytest.MonkeyPatch) -> Generator[NES, None, None]:
 class TestWindowMaximize:
     def test_default_small_window(self, windowed_nes: NES) -> None:
         assert windowed_nes._screen is not None
-        assert windowed_nes._screen.get_size() == (256, 240)
+        assert windowed_nes._screen.get_size() == (1024, 768)
         assert not windowed_nes._maximized
 
     def test_maximize_is_borderless_fullscreen(self, windowed_nes: NES) -> None:
@@ -79,7 +79,7 @@ class TestWindowMaximize:
         pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
         windowed_nes._handle_events()
         assert windowed_nes._screen is not None
-        assert windowed_nes._screen.get_size() == (256, 240)
+        assert windowed_nes._screen.get_size() == (1024, 768)
         assert windowed_nes._screen.get_flags() & pygame.RESIZABLE
         assert not windowed_nes._maximized
 
