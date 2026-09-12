@@ -96,3 +96,7 @@ build/
 *.cache
 
 AGENTS.md
+# smb-assembler 参考仓库（含 Nintendo 版权 ROM mario.nes，禁止入库）
+doc/smb-assembler-master/
+doc/smb-assembler-master.zip
+doc/reference/

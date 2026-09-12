@@ -180,12 +180,15 @@ static int mirror_nt(Nes* n, uint16_t addr) {
 }
 
 static int mirror_pal(int addr) {
-    /* $3F00-$3F0F are unique; $3F10-$3F1F mirror $3F00-$3F0F.
-       $3F04/$3F08/$3F0C are NOT mirrors of $3F00 — they are separate
-       palette RAM bytes (unused for BG color 0 during rendering). */
+    /* Palette RAM is 32 bytes ($3F00-$3F1F). Only the four sprite "entry 0"
+       slots ($3F10/$14/$18/$1C) mirror the BG "entry 0" slots ($3F00/$04/
+       $08/$0C); every other byte is unique storage. $3F04/$08/$0C are NOT
+       mirrors of $3F00. Mirroring the whole $3F10-$3F1F range would let a
+       full 32-byte palette upload overwrite the BG palettes with sprite
+       data (SMB scenery then renders with the wrong palette class). */
     int a = (addr - 0x3F00) % 0x20;
-    if (a >= 0x10) {
-        a -= 0x10;
+    if ((a & 0x13) == 0x10) {
+        a &= ~0x10;
     }
     return a;
 }

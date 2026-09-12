@@ -61,7 +61,11 @@ void nes_get_debug(Nes* n, uint16_t* pc, uint8_t* a, uint8_t* x, uint8_t* y, uin
 
 void nes_dump_palette(Nes* n, uint8_t* out32) {
     if (!n || !out32) return;
-    memcpy(out32, n->ppu_mem.palette, 32);
+    /* Read through ppu_read so the four mirrored sprite entry-0 slots
+       ($3F10/$14/$18/$1C) report the hardware-authentic values. */
+    for (int i = 0; i < 32; i++) {
+        out32[i] = ppu_read(n, (uint16_t)(0x3F00 + i));
+    }
 }
 
 uint8_t nes_peek_ppu(Nes* n, uint16_t addr) {
