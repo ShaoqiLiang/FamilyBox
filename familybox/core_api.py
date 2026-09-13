@@ -33,9 +33,18 @@ def _find_lib() -> Path:
 
 _LIB_PATH = _find_lib()
 
+# Must match FB_CORE_ABI_VERSION in familybox/include/familybox.h. The core
+# reports its value via nes_abi_version(); a mismatch means the DLL on disk
+# is older or newer than this binding — fail fast with a rebuild hint.
+REQUIRED_ABI_VERSION = 1
+
 
 class NesCore:
-    """Thin wrapper around libfamilybox."""
+    """Thin wrapper around libfamilybox.
+
+    Sole ctypes.CDLL load point; every familybox.h function has exactly one
+    prototype declaration here (design doc §5).
+    """
 
     def __init__(self) -> None:
         if not _LIB_PATH.exists():
@@ -44,6 +53,27 @@ class NesCore:
             )
         self._lib = ctypes.CDLL(str(_LIB_PATH))
         lib = self._lib
+
+        lib.nes_abi_version.restype = ctypes.c_int32
+        lib.nes_abi_version.argtypes = []
+        abi_fn = getattr(lib, "nes_abi_version", None)
+        if abi_fn is None:
+            raise RuntimeError(
+                f"C core at {_LIB_PATH} does not export nes_abi_version — "
+                "the DLL predates the ABI freeze. Rebuild with "
+                "familybox\\build.bat."
+            )
+        actual = int(abi_fn())
+        if actual != REQUIRED_ABI_VERSION:
+            raise RuntimeError(
+                f"ABI version mismatch: core at {_LIB_PATH} reports "
+                f"{actual}, binding expects {REQUIRED_ABI_VERSION}. "
+                "The DLL is stale or newer than the binding — rebuild with "
+                "familybox\\build.bat or update familybox/core_api.py."
+            )
+
+        lib.nes_video.restype = ctypes.POINTER(ctypes.c_uint8)
+        lib.nes_video.argtypes = [ctypes.c_void_p]
 
         lib.nes_create.restype = ctypes.c_void_p
         lib.nes_create.argtypes = []
@@ -125,7 +155,16 @@ class NesCore:
         self._handle = lib.nes_create()
         if not self._handle:
             raise MemoryError("nes_create failed")
-        self._rgb = (ctypes.c_uint8 * (256 * 240 * 3))()
+        # Zero-copy video (design doc §4.2/§5): the core owns the frame
+        # buffer; we hold one long-lived typed view over it. Valid until the
+        # next run_frame/reset on this handle — copy if retaining.
+        video = ctypes.cast(
+            lib.nes_video(self._handle),
+            ctypes.POINTER(ctypes.c_uint8 * (256 * 240 * 3)),
+        ).contents
+        # cast("B"): ctypes reports format "<B", which memoryview indexing
+        # rejects; the cast view supports indexing/hashing/frombuffer.
+        self._video_view = memoryview(video).cast("B")
         self._pcm = (ctypes.c_int16 * 8192)()
         self._lib_path = _LIB_PATH
 
@@ -149,14 +188,24 @@ class NesCore:
     def set_buttons(self, buttons: int) -> None:
         self._lib.nes_set_buttons(self._handle, buttons & 0xFF)
 
-    def run_frame(self) -> tuple[bytes, bytes]:
-        """Run one frame. Returns (rgb_bytes, pcm_bytes)."""
-        n = self._lib.nes_run_frame(self._handle, self._rgb, self._pcm, 8192)
+    def abi_version(self) -> int:
+        """ABI version reported by the loaded C core."""
+        return int(self._lib.nes_abi_version())
+
+    def run_frame(self) -> tuple[memoryview, bytes]:
+        """Run one frame. Returns (rgb_view, pcm_bytes).
+
+        rgb_view is a zero-copy view over the core-internal frame buffer
+        (256*240*3, RGB). It stays valid only until the next run_frame or
+        reset on this handle; hash/blit it immediately, or copy (bytes) if
+        retaining across frames. This removes the two 184 KB copies per
+        frame the old binding performed.
+        """
+        n = self._lib.nes_run_frame(self._handle, None, self._pcm, 8192)
         if n < 0:
             raise RuntimeError("nes_run_frame failed")
-        rgb = bytes(self._rgb)
         pcm = bytes(memoryview(self._pcm).cast("B")[: n * 2]) if n else b""
-        return rgb, pcm
+        return self._video_view, pcm
 
     def debug(self) -> dict[str, int]:
         pc = ctypes.c_uint16(0)
