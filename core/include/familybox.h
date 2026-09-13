@@ -23,8 +23,9 @@ extern "C"
 #define FB_API
 #endif
 
-/* v1: initial freeze — nes_* surface below as shipped in develop260912/13. */
-#define FB_CORE_ABI_VERSION 1
+/* v1: initial freeze — nes_* surface as shipped in develop260912/13.
+   v2: + nes_set_timing (region-aware video timing, NTSC/PAL). */
+#define FB_CORE_ABI_VERSION 2
 
     typedef struct Nes Nes;
 
@@ -36,6 +37,10 @@ extern "C"
     /* 0 = ok, negative = error */
     FB_API int nes_load_rom(Nes *nes, const char *path);
     FB_API void nes_reset(Nes *nes);
+    /* Video timing standard: 0 = NTSC (262 lines, 60.0988 fps, 1.789773 MHz),
+       1 = PAL (312 lines, 50.007 fps, 1.662607 MHz). Applies immediately;
+       call before nes_reset for a clean frame boundary. */
+    FB_API void nes_set_timing(Nes *nes, int region);
     FB_API void nes_set_buttons(Nes *nes, uint8_t buttons);
     /* Run one full frame. rgb: 256*240*3 bytes, may be NULL. pcm: int16 samples.
        Returns number of PCM samples written (>=0), or -1 on error. */

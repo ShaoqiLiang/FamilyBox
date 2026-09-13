@@ -21,7 +21,7 @@ void ppu_reset(Nes *n)
 {
     Ppu *p = &n->ppu;
     memset(p, 0, sizeof(*p));
-    p->scanline = 261;
+    p->scanline = n->timing.prerender_scanline;
     p->even_frame = 1;
 }
 
@@ -276,7 +276,7 @@ int ppu_step(Nes *n, int ppu_dots)
         }
 
         int visible = (p->scanline >= 0 && p->scanline < 240);
-        int prerender = (p->scanline == 261);
+        int prerender = (p->scanline == n->timing.prerender_scanline);
 
         if (p->scanline == 0 && p->cycle == 0)
         {
@@ -330,7 +330,7 @@ int ppu_step(Nes *n, int ppu_dots)
         {
             p->cycle = 0;
             p->scanline++;
-            if (p->scanline > 261)
+            if (p->scanline > n->timing.prerender_scanline)
             {
                 p->scanline = 0;
                 p->frame++;

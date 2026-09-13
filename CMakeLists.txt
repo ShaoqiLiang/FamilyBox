@@ -30,4 +30,4 @@ else()
   file(REMOVE "${FB_OUTPUT_DIR}/.fb_debug")
 endif()
 
-add_subdirectory(familybox)
+add_subdirectory(core)

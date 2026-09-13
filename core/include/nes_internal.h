@@ -164,8 +164,22 @@ typedef struct
     uint8_t wram[0x2000]; /* $6000-$7FFF PRG RAM (battery-backed on some boards) */
 } Cart;
 
+/* Video timing standard (design doc M2.5). PAL frame counter steps are the
+   NTSC sequence scaled by the PAL frame length (33256.5/29830.5). */
+typedef struct
+{
+    int region;              /* 0=NTSC, 1=PAL */
+    int scanlines_per_frame; /* 262 / 312 (loop bound, incl. pre-render) */
+    int prerender_scanline;  /* 261 / 311 */
+    int cpu_hz;              /* 1789773 / 1662607 */
+    int dots_per_cpu_num;    /* PPU dots per CPU cycle, rational: 3/1, 16/5 */
+    int dots_per_cpu_den;
+    uint32_t cycle_acc;      /* fractional CPU-cycle accumulator (num units) */
+} Timing;
+
 typedef struct Nes
 {
+    Timing timing;
     Cpu cpu;
     Ppu ppu;
     PpuMem ppu_mem;
