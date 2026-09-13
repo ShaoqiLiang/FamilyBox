@@ -162,6 +162,9 @@ class NES:
             pygame.init()
             self._screen = pygame.display.set_mode(_WINDOW_SIZE, pygame.RESIZABLE)
             pygame.display.set_caption("FamilyBox -Auth:ShaoqiLiang")
+            # 关闭文本输入：pygame 默认开启它，中文 IME 会拦截字母键并把
+            # 方向键变成候选框导航，症状是“按键失灵，按空格才恢复”。
+            pygame.key.stop_text_input()
             try:
                 pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=1024)
                 self._channel = pygame.mixer.Channel(0)
@@ -372,6 +375,7 @@ class NES:
         pygame.display.quit()
         pygame.display.init()
         self._screen = pygame.display.set_mode(desktop, pygame.NOFRAME)
+        pygame.key.stop_text_input()  # 重建显示后 pygame 会再次开启
         self._maximized = True
 
     def _restore_window(self) -> None:

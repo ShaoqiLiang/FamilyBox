@@ -212,3 +212,27 @@ class TestAudioPump:
                 break
         assert len(ch.played) == plays_before + 1  # re-prime uses play()
         assert len(ch.queued) == queues_before  # and never queue()
+
+
+class TestTextInputDisabled:
+    def test_init_disables_text_input(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """中文 IME 会劫持字母键/方向键——前端初始化必须关闭文本输入。"""
+        import pygame
+
+        calls = []
+        monkeypatch.setattr(pygame.key, "stop_text_input", lambda: calls.append(1))
+        n = NES(ROM_PATH)  # windowed (dummy driver)
+        n.close()
+        assert calls, "NES init must call pygame.key.stop_text_input()"
+
+    def test_maximize_keeps_text_input_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import pygame
+
+        calls = []
+        monkeypatch.setattr(pygame.key, "stop_text_input", lambda: calls.append(1))
+        n = NES(ROM_PATH)
+        before = len(calls)
+        pygame.event.post(pygame.event.Event(pygame.WINDOWMAXIMIZED))
+        n._handle_events()  # 重建显示后必须再次关闭
+        n.close()
+        assert len(calls) > before
