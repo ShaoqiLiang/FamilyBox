@@ -33,10 +33,13 @@ def _find_lib() -> Path:
 
 _LIB_PATH = _find_lib()
 
-# Must match FB_CORE_ABI_VERSION in familybox/include/familybox.h. The core
+# Must match FB_CORE_ABI_VERSION in core/include/familybox.h. The core
 # reports its value via nes_abi_version(); a mismatch means the DLL on disk
 # is older or newer than this binding — fail fast with a rebuild hint.
-REQUIRED_ABI_VERSION = 1
+#
+# v1: initial freeze (nes_* surface).
+# v2: + nes_set_timing (region-aware video timing, NTSC/PAL).
+REQUIRED_ABI_VERSION = 2
 
 
 class NesCore:
@@ -74,6 +77,8 @@ class NesCore:
 
         lib.nes_video.restype = ctypes.POINTER(ctypes.c_uint8)
         lib.nes_video.argtypes = [ctypes.c_void_p]
+        lib.nes_set_timing.restype = None
+        lib.nes_set_timing.argtypes = [ctypes.c_void_p, ctypes.c_int]
 
         lib.nes_create.restype = ctypes.c_void_p
         lib.nes_create.argtypes = []
@@ -181,6 +186,10 @@ class NesCore:
 
     def load_rom(self, path: str) -> int:
         return self._lib.nes_load_rom(self._handle, str(path).encode("utf-8"))
+
+    def set_timing(self, region: int) -> None:
+        """Video timing standard: 0 = NTSC, 1 = PAL (see familybox.h)."""
+        self._lib.nes_set_timing(self._handle, region)
 
     def reset(self) -> None:
         self._lib.nes_reset(self._handle)

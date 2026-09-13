@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from familybox.core_api import NesCore
+from familybox.session import EmulationSession
 
 ROM_PATH = "rom/super-mario-bros.nes"  # tracked PAL EU cartridge
 ROM_NTSC = "rom/super-mario-bros-ntsc.nes"  # local NTSC copy (gitignored)
@@ -122,6 +123,10 @@ class TestAudioPitch:
         pe5 = _goertzel_power(seg, 659.3)
         pe6 = _goertzel_power(seg, 1318.5)
         assert pe5 > 8 * pe6, {"E5": pe5, "E6": pe6}
+
+    @classmethod
+    def _capture_session_ntsc(cls, frames: int) -> bytes:
+        return cls._capture_session("ntsc", frames, rom=ROM_NTSC)
 
 
 def _capture_frames(rom: str, begin: int, end: int) -> list[bytes]:
@@ -275,3 +280,57 @@ class TestBlarggDriver:
             pytest.fail(f"blargg test ROM failures: {failures}")
         if pending:
             pytest.skip(f"pending (see design doc M3/M6): {pending}")
+
+
+class TestRegionTiming:
+    """M2.5: region-aware video timing (design doc §12 M2.5)."""
+
+    @staticmethod
+    def _capture_session(region: str, frames: int, rom: str = ROM_PATH) -> bytes:
+        from tests.test_session import FakeClock, _SilentChannel
+
+        if region == "pal":
+            fs = (341 * 312 * 5 / 16) / 1662607
+        else:
+            fs = (341 * 262 / 3) / 1789773
+        clk = FakeClock(delta=fs / 2)  # two reads per step = one frame
+        s = EmulationSession(
+            rom,
+            region=region,
+            channel=_SilentChannel(),
+            sound_factory=lambda data: object(),
+            sleep=lambda sec: None,
+            clock=clk,
+        )
+        s.reset()
+        chunks = []
+        for f in range(1, frames + 1):
+            s.set_buttons(0x08 if 60 <= f < 70 else 0x00)
+            _, pcm = s.step()
+            if f >= 130:
+                chunks.append(pcm)
+        return b"".join(chunks)
+
+    def test_pal_on_pal_timing_pitch_restored(self) -> None:
+        """PAL cartridge on PAL timing: the music periods were computed for
+        the PAL CPU, so the intro's first note renders at ~661.6 Hz (E5
+        family) instead of the +7.6% sharp 712.7 Hz seen when PAL data runs
+        on the NTSC clock (test_pal_pitch_no_octave_shift pins THAT mode)."""
+        pcm = self._capture_session("pal", 400)
+        seg = _pcm_slice(pcm, 0.10, 1.20)  # theme start (PAL card is shorter)
+        p662 = _goertzel_power(seg, 661.6)
+        p713 = _goertzel_power(seg, 712.7)
+        assert p662 > 20 * p713, {"661.6": p662, "712.7": p713}
+
+    def test_ntsc_on_ntsc_timing_pitch_is_e5(self) -> None:
+        if not Path(ROM_NTSC).exists():
+            pytest.skip("NTSC cartridge copy not present")
+        pcm = self._capture_session_ntsc(400)
+        seg = _pcm_slice(pcm, 1.40, 1.85)
+        pe5 = _goertzel_power(seg, 659.3)
+        pe6 = _goertzel_power(seg, 1318.5)
+        assert pe5 > 8 * pe6, {"E5": pe5, "E6": pe6}
+
+    @classmethod
+    def _capture_session_ntsc(cls, frames: int) -> bytes:
+        return cls._capture_session("ntsc", frames, rom=ROM_NTSC)

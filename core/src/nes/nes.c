@@ -9,9 +9,33 @@
 
 /* NTSC: 341 PPU dots per scanline, ~113.667 CPU cycles per scanline. */
 #define PPU_DOTS_PER_SCANLINE 341
-#define SCANLINES_PER_FRAME   262
 
 int32_t nes_abi_version(void) { return FB_CORE_ABI_VERSION; }
+
+void nes_set_timing(Nes *n, int region)
+{
+    if (!n)
+        return;
+    if (region == 1)
+    {
+        n->timing.region = 1;
+        n->timing.scanlines_per_frame = 312;
+        n->timing.prerender_scanline = 311;
+        n->timing.cpu_hz = 1662607;
+        n->timing.dots_per_cpu_num = 16;
+        n->timing.dots_per_cpu_den = 5; /* 3.2 dots per CPU cycle */
+    }
+    else
+    {
+        n->timing.region = 0;
+        n->timing.scanlines_per_frame = 262;
+        n->timing.prerender_scanline = 261;
+        n->timing.cpu_hz = 1789773;
+        n->timing.dots_per_cpu_num = 3;
+        n->timing.dots_per_cpu_den = 1; /* 3 dots per CPU cycle */
+    }
+    n->timing.cycle_acc = 0;
+}
 
 const uint8_t *nes_video(Nes *n)
 {
@@ -25,6 +49,7 @@ Nes *nes_create(void)
     Nes *n = (Nes *)calloc(1, sizeof(Nes));
     if (!n)
         return NULL;
+    nes_set_timing(n, 0);
     apu_reset(n);
     ppu_reset(n);
     FB_DBG("core created (debug=%d)\n", FB_DEBUG_ENABLED);
@@ -181,8 +206,15 @@ int nes_wrlog_copy(Nes *n, uint8_t *out, int max_entries)
     return m;
 }
 
-/* CPU cycles for one scanline: 113 or 114 to average ~113.667 */
-static int cpu_cycles_for_scanline(int sl) { return 113 + ((sl % 3) == 2 ? 1 : 0); }
+/* CPU cycles for one scanline via a fractional accumulator:
+   NTSC 341/3 -> 113,114,114...; PAL 341x5/16 -> 106/107 (106.5625 avg). */
+static int cpu_cycles_for_scanline(Nes *n)
+{
+    n->timing.cycle_acc += (uint32_t)(PPU_DOTS_PER_SCANLINE * n->timing.dots_per_cpu_den);
+    int c = (int)(n->timing.cycle_acc / (uint32_t)n->timing.dots_per_cpu_num);
+    n->timing.cycle_acc %= (uint32_t)n->timing.dots_per_cpu_num;
+    return c;
+}
 
 int nes_run_frame(Nes *n, uint8_t *rgb, int16_t *pcm, int max_samples)
 {
@@ -191,9 +223,9 @@ int nes_run_frame(Nes *n, uint8_t *rgb, int16_t *pcm, int max_samples)
 
     int total_samples = 0;
 
-    for (int sl = 0; sl < SCANLINES_PER_FRAME; sl++)
+    for (int sl = 0; sl < n->timing.scanlines_per_frame; sl++)
     {
-        int budget = cpu_cycles_for_scanline(sl);
+        int budget = cpu_cycles_for_scanline(n);
         int dots_done = 0;
         int cpu_used = 0;
 

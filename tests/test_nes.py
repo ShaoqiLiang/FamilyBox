@@ -129,7 +129,7 @@ class TestAudioPump:
     FRAME = 734  # mono samples per core frame
 
     def _pump(self, channels: int = 1) -> tuple[object, _FakeChannel, list[bytes]]:
-        from familybox.nes import _AudioPump
+        from familybox.session import AudioPump as _AudioPump
 
         ch = _FakeChannel()
         data: list[bytes] = []

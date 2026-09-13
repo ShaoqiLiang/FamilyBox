@@ -19,7 +19,7 @@ void apu_reset(Nes *n)
     memset(a, 0, sizeof(*a));
     a->noise.shift_reg = 1;
     a->sample_rate = 44100;
-    a->cycles_per_sample = 1789773.0 / 44100.0;
+    a->cycles_per_sample = (double)n->timing.cpu_hz / 44100.0;
     a->sample_timer = 0.0;
 }
 
@@ -345,9 +345,15 @@ void apu_tick(Nes *n, int cpu_cycles, int16_t *pcm, int max_samples, int *out_co
     *out_count = 0;
 
     a->frame_counter += cpu_cycles;
-    int *steps4 = (int[]){7457, 14913, 22371, 29829};
-    int *steps5 = (int[]){7457, 14913, 22371, 29829, 37281};
-    int *steps = a->frame_mode ? steps5 : steps4;
+    /* Frame-counter steps: NTSC 60Hz-designed; PAL scales by the PAL frame
+       length (33256.5/29830.5 CPU cycles). */
+    int steps4_ntsc[] = {7457, 14913, 22371, 29829};
+    int steps5_ntsc[] = {7457, 14913, 22371, 29829, 37281};
+    int steps4_pal[] = {8314, 16628, 24942, 33256};
+    int steps5_pal[] = {8314, 16628, 24942, 33256, 41570};
+    int pal = n->timing.region == 1;
+    int *steps = a->frame_mode ? (pal ? steps5_pal : steps5_ntsc)
+                               : (pal ? steps4_pal : steps4_ntsc);
     int max_steps = a->frame_mode ? 5 : 4;
 
     while (a->frame_step < max_steps && a->frame_counter >= steps[a->frame_step])

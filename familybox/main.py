@@ -46,6 +46,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run without creating a window (for testing)",
     )
     parser.add_argument(
+        "--region",
+        default="ntsc",
+        choices=["ntsc", "pal"],
+        help="Video timing standard (default: ntsc). Use pal for European "
+        "cartridges: 312 lines / 50.007 fps / 1.66 MHz CPU.",
+    )
+    parser.add_argument(
         "--log-level",
         default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -94,7 +101,7 @@ def main(argv: list[str] | None = None) -> None:
 
     nes = None
     try:
-        nes = NES(args.rom, headless=args.headless)
+        nes = NES(args.rom, headless=args.headless, region=args.region)
         nes.run()
     except FileNotFoundError as e:
         print(f"Error: ROM file not found: {e}", file=sys.stderr)
