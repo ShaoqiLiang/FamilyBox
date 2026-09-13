@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from pathlib import Path
 
 import pygame
 import pytest
 
+from window.frontends.menu_bar import Action
 from window.frontends.pygame_frontend import NES
 
 ROM_PATH = "rom/super-mario-bros.nes"
@@ -225,7 +227,9 @@ class TestTextInputDisabled:
         n.close()
         assert calls, "NES init must call pygame.key.stop_text_input()"
 
-    def test_maximize_keeps_text_input_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_maximize_keeps_text_input_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         import pygame
 
         calls = []
@@ -236,3 +240,131 @@ class TestTextInputDisabled:
         n._handle_events()  # 重建显示后必须再次关闭
         n.close()
         assert len(calls) > before
+
+
+class TestRomLoader:
+    """O 键文件对话框与拖拽载入卡带（无卡带分发模式）。"""
+
+    @staticmethod
+    def _synthetic_rom(tmp_path: Path) -> Path:
+        from tests.test_regression import TestBlarggDriver
+
+        rom = tmp_path / "syn.nes"
+        TestBlarggDriver._build_pass_rom(rom)
+        return rom
+
+    def test_no_rom_opens_loader_mode(self) -> None:
+        n = NES(None)  # 无卡带启动
+        assert n._cart_loaded is False
+        n._present_no_cart()  # 引导屏可渲染
+        n.close()
+
+    def test_o_key_opens_dialog_and_loads(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        n = NES(None)
+        rom = self._synthetic_rom(tmp_path)
+        monkeypatch.setattr(n, "_open_rom_dialog", lambda: str(rom))
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_o))
+        n._handle_events()
+        n.close()
+        assert n._cart_loaded is True
+        assert n._osd_text is not None and "syn.nes" in n._osd_text
+
+    def test_dropfile_loads(self, tmp_path: Path) -> None:
+        n = NES(None)
+        rom = self._synthetic_rom(tmp_path)
+        pygame.event.post(pygame.event.Event(pygame.DROPFILE, file=str(rom)))
+        n._handle_events()
+        n.close()
+        assert n._cart_loaded is True
+
+    def test_dropfile_bad_file_reports(self, tmp_path: Path) -> None:
+        n = NES(None)
+        bad = tmp_path / "bad.nes"
+        bad.write_bytes(b"junk")
+
+        def _noop_box(title: str, text: str) -> None:
+            pass
+
+        n._message_box = _noop_box  # 无头环境不弹真框
+        pygame.event.post(pygame.event.Event(pygame.DROPFILE, file=str(bad)))
+        n._handle_events()
+        n.close()
+        assert n._cart_loaded is False
+        assert n._osd_text is not None and "载入失败" in n._osd_text
+
+
+class TestMenuActions:
+    """菜单动作分发：与快捷键共用同一路径。"""
+
+    @staticmethod
+    def _dispatch(n: NES, action: Action, **extra: object) -> None:
+        n._dispatch_menu(int(action), extra)
+
+    def test_pause_toggles_and_osd(self) -> None:
+        n = NES(ROM_PATH)
+        assert n._paused is False
+        self._dispatch(n, Action.PAUSE)
+        assert n._paused is True
+        assert n._osd_text is not None and "暂停" in n._osd_text
+        self._dispatch(n, Action.PAUSE)
+        assert n._paused is False
+        n.close()
+
+    def test_reset_action(self) -> None:
+        n = NES(ROM_PATH)
+        self._dispatch(n, Action.RESET)
+        assert n._osd_text is not None and "复位" in n._osd_text
+        n.close()
+
+    def test_mute_toggles_volume(self) -> None:
+        n = NES(ROM_PATH)
+        self._dispatch(n, Action.MUTE)
+        assert n._muted is True
+        self._dispatch(n, Action.MUTE)
+        assert n._muted is False
+        n.close()
+
+    def test_region_switch_resets_and_rebuilds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        n = NES(ROM_PATH)
+        rebuilds: list[int] = []
+        monkeypatch.setattr(n._menu, "rebuild", lambda *a, **k: rebuilds.append(1))
+        self._dispatch(n, Action.TIMING_PAL, region="pal")
+        assert n._session.region == "pal"
+        assert rebuilds
+        n.close()
+
+    def test_lang_switch_rebuilds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        n = NES(ROM_PATH)
+        rebuilds: list[int] = []
+        monkeypatch.setattr(n._menu, "rebuild", lambda *a, **k: rebuilds.append(1))
+        self._dispatch(n, Action.LANG_EN, lang="en")
+        assert n._lang == "en"
+        assert rebuilds
+        self._dispatch(n, Action.LANG_ZH, lang="zh")
+        assert n._lang == "zh"
+        n.close()
+
+    def test_scale_switch(self) -> None:
+        n = NES(ROM_PATH)
+        self._dispatch(n, Action.SCALE_2)
+        assert n._scale == 2
+        assert n._screen is not None
+        assert n._screen.get_size() == (512, 480)
+        n.close()
+
+    def test_help_dialogs_route_through_message_box(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        n = NES(ROM_PATH)
+        boxes: list[tuple[str, str]] = []
+        monkeypatch.setattr(n, "_message_box", lambda t, x: boxes.append((t, x)))
+        self._dispatch(n, Action.KEYS_HELP)
+        self._dispatch(n, Action.ABOUT)
+        assert len(boxes) == 2
+        assert boxes[0][0] == "按键说明"
+        assert "FamilyBox" in boxes[1][0]
+        n.close()

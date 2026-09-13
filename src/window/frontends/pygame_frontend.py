@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -12,7 +13,11 @@ from typing import Any
 import pygame
 
 from window.binding.core_api import _LIB_PATH
+from window.frontends.menu_bar import Action, MenuBar
+from window.localization import tr
 from window.session import EmulationSession
+
+FB_MENU = pygame.event.custom_type()
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +144,7 @@ class NES:
     EmulationSession (L4) — core handle, audio feeding, pacing and input."""
 
     def __init__(
-        self, rom_path: str, headless: bool = False, region: str = "ntsc"
+        self, rom_path: str | None, headless: bool = False, region: str = "ntsc"
     ) -> None:
         self._debug = _debug_on()
         mode = "DEBUG" if self._debug else "RELEASE"
@@ -157,11 +162,22 @@ class NES:
         self._channel = None
         self._channels = 1
         self._maximized = False
+        self._fullscreen = False
+        self._cart_loaded = False
+        self._osd_text: str | None = None
+        self._osd_until = 0.0
+        self._font: pygame.font.Font | None = None
+        self._lang = "zh"
+        self._paused = False
+        self._muted = False
+        self._scale = 3
+        self._menu = MenuBar()
 
         if not headless:
             pygame.init()
             self._screen = pygame.display.set_mode(_WINDOW_SIZE, pygame.RESIZABLE)
             pygame.display.set_caption("FamilyBox -Auth:ShaoqiLiang")
+            self._enable_file_drop()
             # 关闭文本输入：pygame 默认开启它，中文 IME 会拦截字母键并把
             # 方向键变成候选框导航，症状是“按键失灵，按空格才恢复”。
             pygame.key.stop_text_input()
@@ -194,8 +210,20 @@ class NES:
             channels=self._channels,
         )
         self._core = self._session.core
+        self._cart_loaded = self._session.cart_loaded
+        if self._cart_loaded and rom_path:
+            pygame.display.set_caption(f"FamilyBox — {Path(rom_path).name}")
 
-    def _open_run_log(self, mode: str, rom_path: str) -> Path | None:
+        if not headless:
+            info = pygame.display.get_wm_info()
+            hwnd = info.get("hwnd") or info.get("window") or 0
+            if isinstance(hwnd, str):  # pygame-ce returns hex string
+                hwnd = int(hwnd, 16) if hwnd.startswith("0x") else int(hwnd)
+            self._menu.attach(
+                hwnd, self._lang, self._menu_state(), self._dispatch_menu, FB_MENU
+            )
+
+    def _open_run_log(self, mode: str, rom_path: str | None) -> Path | None:
         """Append-only log under build/log. Always created so runs are comparable."""
         try:
             ts = time.strftime("%Y%m%d_%H%M%S")
@@ -230,17 +258,224 @@ class NES:
         self._session.reset()
 
     def run(self) -> None:
-        self._session.reset()
-        for _ in range(2):
-            self._session.step()  # warm-up past the initial garbage frame
+        if self._cart_loaded:
+            self._session.reset()
+            for _ in range(2):
+                self._session.step()  # warm-up past the initial garbage frame
 
         while self._running:
-            self._run_frame()
             if not self._headless:
                 self._handle_events()
+            if not self._cart_loaded:
+                if self._headless:
+                    print("[NES] no cartridge loaded — nothing to run", flush=True)
+                    self._running = False
+                    break
+                self._present_no_cart()
+                continue
+            if self._paused:
+                if not self._headless:
+                    self._present(paused=True)
+                continue
+            self._run_frame()
+            if not self._headless:
                 self._present()
                 # pacing (native frame cadence on the audio clock) happens
                 # inside session.step() — no wall-clock tick here.
+
+    # -- 卡带载入（O 键对话框 / 拖拽 / 无卡带引导屏）--
+
+    def _enable_file_drop(self) -> None:
+        pygame.event.set_allowed(pygame.DROPFILE)
+        try:
+            self._font = pygame.font.SysFont("microsoftyahei,consolas,simhei", 22)
+        except Exception:
+            self._font = None
+
+    def _osd(self, text: str, seconds: float = 3.0) -> None:
+        """Timed on-screen message, drawn by _present."""
+        self._osd_text = text
+        self._osd_until = time.perf_counter() + seconds
+
+    def _open_rom_dialog(self) -> str | None:
+        """Native Windows file picker (comdlg32, zero dependencies)."""
+        if sys.platform != "win32":
+            self._osd("此平台暂无文件选择框，请用命令行传入 ROM")
+            return None
+        import ctypes
+        from ctypes import wintypes
+
+        class OPENFILENAMEW(ctypes.Structure):
+            _fields_ = [
+                ("lStructSize", wintypes.DWORD),
+                ("hwndOwner", wintypes.HWND),
+                ("hInstance", wintypes.HINSTANCE),
+                ("lpstrFilter", wintypes.LPCWSTR),
+                ("lpstrCustomFilter", wintypes.LPWSTR),
+                ("nMaxCustFilter", wintypes.DWORD),
+                ("nFilterIndex", wintypes.DWORD),
+                ("lpstrFile", wintypes.LPWSTR),
+                ("nMaxFile", wintypes.DWORD),
+                ("lpstrFileTitle", wintypes.LPWSTR),
+                ("nMaxFileTitle", wintypes.DWORD),
+                ("lpstrInitialDir", wintypes.LPCWSTR),
+                ("lpstrTitle", wintypes.LPCWSTR),
+                ("Flags", wintypes.DWORD),
+                ("nFileOffset", wintypes.WORD),
+                ("nFileExtension", wintypes.WORD),
+                ("lpstrDefExt", wintypes.LPCWSTR),
+                ("lCustData", wintypes.LPARAM),
+                ("lpfnHook", ctypes.c_void_p),
+                ("lpTemplateName", wintypes.LPCWSTR),
+                ("pvReserved", ctypes.c_void_p),
+                ("dwReserved", wintypes.DWORD),
+                ("FlagsEx", wintypes.DWORD),
+            ]
+
+        buf = ctypes.create_unicode_buffer(512)
+        ofn = OPENFILENAMEW()
+        ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
+        try:
+            ofn.hwndOwner = pygame.display.get_wm_info()["hwnd"]
+        except KeyError, pygame.error:
+            ofn.hwndOwner = None
+        ofn.lpstrFilter = "NES 卡带 (*.nes)\0*.nes\0所有文件 (*.*)\0*.*\0"
+        ofn.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)
+        ofn.nMaxFile = len(buf)
+        ofn.lpstrTitle = "选择 NES 卡带"
+        ofn.Flags = 0x1000 | 0x4  # OFN_FILEMUSTEXIST | OFN_HIDEREADONLY
+        if ctypes.windll.comdlg32.GetOpenFileNameW(ctypes.byref(ofn)):
+            return buf.value
+        return None  # user cancelled
+
+    def _load_rom_path(self, path: str) -> None:
+        """Hot-swap cartridge from the frontend; errors surface via OSD/弹窗."""
+        if self._session.load_rom(path):
+            self._cart_loaded = True
+            self._buttons = 0
+            self._session.set_buttons(0)
+            name = Path(path).name
+            pygame.display.set_caption(f"FamilyBox — {name}")
+            self._osd(f"已载入 {name}")
+        else:
+            self._osd(f"载入失败（不支持的卡带）：{Path(path).name}", 4.0)
+            self._message_box(
+                "载入失败",
+                f"无法载入该文件（可能是不支持的 mapper 或损坏的文件）：\n{path}",
+            )
+
+    @staticmethod
+    def _message_box(title: str, text: str) -> None:
+        if sys.platform == "win32":
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(None, text, title, 0x10)  # MB_ICONERROR
+
+    # -- menu actions (same handlers as hotkeys) --
+
+    def _menu_state(self) -> dict[str, object]:
+        return {
+            "region": self._session.region,
+            "lang": self._lang,
+            "muted": self._muted,
+            "fullscreen": self._fullscreen,
+            "scale": self._scale,
+        }
+
+    def _rebuild_menu(self) -> None:
+        hwnd = pygame.display.get_wm_info().get("hwnd", 0)
+        self._menu.rebuild(hwnd, self._lang, self._menu_state())
+
+    def _dispatch_menu(self, action: int, extra: dict[str, object]) -> None:
+        try:
+            act = Action(action)
+        except ValueError:
+            return
+        if act == Action.OPEN:
+            path = self._open_rom_dialog()
+            if path:
+                self._load_rom_path(path)
+        elif act == Action.EXIT:
+            self._running = False
+        elif act == Action.PAUSE:
+            self._paused = not self._paused
+            key = "osd.paused" if self._paused else "osd.resumed"
+            self._osd(tr(self._lang, key))
+        elif act == Action.RESET:
+            self._session.reset()
+            self._osd(tr(self._lang, "osd.reset"))
+        elif act in (Action.TIMING_NTSC, Action.TIMING_PAL):
+            region = str(extra.get("region", "ntsc"))
+            self._session.set_region(region)
+            name = tr(self._lang, "region." + region)
+            self._osd(tr(self._lang, "osd.region", name=name))
+            self._rebuild_menu()
+        elif act in (Action.LANG_ZH, Action.LANG_EN):
+            self._lang = str(extra.get("lang", "zh"))
+            self._rebuild_menu()
+            self._osd(tr(self._lang, "osd.lang"))
+        elif act == Action.MUTE:
+            self._muted = not self._muted
+            if self._channel is not None:
+                self._channel.set_volume(0.0 if self._muted else 1.0)
+            key = "osd.muted" if self._muted else "osd.unmuted"
+            self._osd(tr(self._lang, key))
+            self._rebuild_menu()
+        elif act == Action.FULLSCREEN:
+            self._toggle_fullscreen()
+        elif act in (Action.SCALE_1, Action.SCALE_2, Action.SCALE_3, Action.SCALE_4):
+            self._scale = int(act) - int(Action.SCALE_1) + 1
+            self._screen = pygame.display.set_mode(
+                (_FRAME_SIZE[0] * self._scale, _FRAME_SIZE[1] * self._scale),
+                pygame.RESIZABLE,
+            )
+            self._osd(tr(self._lang, "osd.scale", n=self._scale))
+            self._rebuild_menu()
+        elif act == Action.KEYS_HELP:
+            self._message_box(
+                tr(self._lang, "dlg.keys.title"), tr(self._lang, "dlg.keys.body")
+            )
+        elif act == Action.ABOUT:
+            self._message_box(
+                tr(self._lang, "dlg.about.title"), tr(self._lang, "dlg.about.body")
+            )
+
+    def _toggle_fullscreen(self) -> None:
+        self._fullscreen = not self._fullscreen
+        pygame.display.quit()
+        pygame.display.init()
+        if self._fullscreen:
+            desktop = pygame.display.get_desktop_sizes()[0]
+            self._screen = pygame.display.set_mode(desktop, pygame.FULLSCREEN)
+        else:
+            self._screen = pygame.display.set_mode(
+                (_FRAME_SIZE[0] * self._scale, _FRAME_SIZE[1] * self._scale),
+                pygame.RESIZABLE,
+            )
+        pygame.key.stop_text_input()
+        self._enable_file_drop()
+        self._rebuild_menu()
+        key = "osd.fullscreen" if self._fullscreen else "osd.windowed"
+        self._osd(tr(self._lang, key))
+
+    def _present_no_cart(self) -> None:
+        """引导屏：没有卡带时的待机画面。"""
+        if self._screen is None:
+            return
+        self._screen.fill((16, 24, 48))
+        if self._font is not None:
+            lines = [
+                "FamilyBox — 请载入 NES 卡带",
+                "",
+                "按 O 选择 .nes 文件，或直接把文件拖进窗口",
+            ]
+            for i, line in enumerate(lines):
+                img = self._font.render(line, True, (220, 224, 236))
+                rect = img.get_rect(
+                    center=(self._screen.get_width() // 2, 200 + i * 44)
+                )
+                self._screen.blit(img, rect)
+        pygame.display.flip()
 
     def _debug_dump(self) -> None:
         c = self._core
@@ -323,10 +558,25 @@ class NES:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self._restore_window()
+                elif event.key == pygame.K_o:
+                    path = self._open_rom_dialog()
+                    if path:
+                        self._load_rom_path(path)
                 else:
                     self._handle_key(event.key, True)
             elif event.type == pygame.KEYUP:
                 self._handle_key(event.key, False)
+            elif event.type == pygame.DROPFILE:
+                path = getattr(event, "file", None)
+                if path:
+                    self._load_rom_path(path)
+            elif event.type == FB_MENU:
+                extra = {
+                    k: getattr(event, k)
+                    for k in ("region", "scale", "lang")
+                    if hasattr(event, k)
+                }
+                self._dispatch_menu(int(getattr(event, "action")), extra)
             elif event.type == pygame.WINDOWMAXIMIZED:
                 self._enter_maximized()
             elif event.type in (pygame.WINDOWFOCUSLOST, pygame.WINDOWMINIMIZED):
@@ -345,7 +595,7 @@ class NES:
             self._buttons &= ~bit
         self._session.set_buttons(self._buttons)
 
-    def _present(self) -> None:
+    def _present(self, paused: bool = False) -> None:
         rgb = getattr(self, "_last_rgb", None)
         if not rgb or self._screen is None:
             return
@@ -363,6 +613,15 @@ class NES:
                 pygame.transform.scale(frame, (w, h)),
                 ((win_w - w) // 2, (win_h - h) // 2),
             )
+        if paused and self._font is not None:
+            img = self._font.render(tr(self._lang, "osd.paused"), True, (255, 236, 160))
+            self._screen.blit(img, (12, 12))
+        if self._osd_text and self._font is not None:
+            if time.perf_counter() < self._osd_until:
+                img = self._font.render(self._osd_text, True, (255, 236, 160))
+                self._screen.blit(img, (12, self._screen.get_height() - 40))
+            else:
+                self._osd_text = None
         pygame.display.flip()
 
     def _enter_maximized(self) -> None:

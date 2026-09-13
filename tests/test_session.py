@@ -52,6 +52,7 @@ def _make_session(
     region: str = "ntsc",
     clock: "FakeClock | None" = None,
     sleep: "Callable[[float], None] | None" = None,
+    rom: str | Path | None = ROM,
 ) -> EmulationSession:
     kwargs: dict[str, object] = {}
     if clock is not None:
@@ -59,7 +60,7 @@ def _make_session(
     if sleep is not None:
         kwargs["sleep"] = sleep
     return EmulationSession(
-        ROM,
+        rom,
         region=region,
         channel=_SilentChannel(),
         sound_factory=lambda data: object(),
@@ -123,3 +124,33 @@ class TestDropRate:
             s.step()
         assert s.underruns() >= 1  # the stall was detected and accounted
         assert s.drop_rate() < 0.01  # recovery keeps losses bounded
+
+
+class TestCartLoading:
+    @staticmethod
+    def _synthetic_rom(tmp_path: Path) -> Path:
+        from tests.test_regression import TestBlarggDriver
+
+        rom = tmp_path / "syn.nes"
+        TestBlarggDriver._build_pass_rom(rom)
+        return rom
+
+    def test_no_cart_mode(self) -> None:
+        s = _make_session(rom=None)
+        assert s.cart_loaded is False
+        rgb, pcm = s.step()
+        assert rgb is None and pcm == b""
+
+    def test_load_rom_hot_swap(self, tmp_path: Path) -> None:
+        s = _make_session(rom=None)
+        assert s.load_rom(self._synthetic_rom(tmp_path)) is True
+        assert s.cart_loaded is True
+        rgb, _ = s.step()
+        assert rgb is not None and len(rgb) == 256 * 240 * 3
+
+    def test_load_rom_rejects_garbage(self, tmp_path: Path) -> None:
+        s = _make_session(rom=None)
+        bad = tmp_path / "bad.nes"
+        bad.write_bytes(b"not a nes file")
+        assert s.load_rom(bad) is False
+        assert s.cart_loaded is False
