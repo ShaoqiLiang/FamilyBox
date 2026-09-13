@@ -102,4 +102,10 @@ packaging/*
 
 logo/*
 
-scripts/package/*
+scripts/msi/*
+scripts/msix/*
+
+# Signing keys (never commit private material)
+/keys/
+*.pfx
+*.pem
