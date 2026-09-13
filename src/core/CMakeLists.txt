@@ -10,11 +10,11 @@ if(WIN32)
 endif()
 
 add_library(familybox_core SHARED
-  src/nes/nes.c
-  src/nes/cpu.c
-  src/nes/ppu.c
-  src/nes/apu.c
-  src/nes/bus.c
+  nes/nes.cpp
+  nes/cpu.cpp
+  nes/ppu.cpp
+  nes/apu.cpp
+  nes/bus.cpp
 )
 
 target_include_directories(familybox_core

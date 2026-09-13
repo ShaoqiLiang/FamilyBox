@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from familybox.session import EmulationSession
+from window.session import EmulationSession
 
 ROM = "rom/super-mario-bros.nes"
 

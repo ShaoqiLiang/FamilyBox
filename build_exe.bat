@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0"
 
 echo [1/3] Ensure C core is built...
-if not exist "familybox\familybox_core.dll" (
-  call familybox\build.bat
+if not exist "src\window\familybox_core.dll" (
+  call scripts\build.bat
   if errorlevel 1 exit /b 1
 )
 
@@ -16,10 +16,11 @@ echo [3/3] Package EXE (onedir, more reliable with native DLL)...
 uv run pyinstaller --noconfirm --clean ^
   --name FamilyBox ^
   --windowed ^
-  --add-binary "familybox\familybox_core.dll;familybox" ^
+  --add-binary "src\window\familybox_core.dll;familybox" ^
   --add-data "rom\super-mario-bros.nes;rom" ^
   --hidden-import pygame ^
-  main.py
+  --paths src ^
+  src\window\main.py
 
 if errorlevel 1 (
   echo PACKAGE FAILED

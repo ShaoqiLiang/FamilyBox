@@ -2,7 +2,7 @@
 
 import pytest
 
-from familybox.main import parse_args
+from window.main import parse_args
 
 
 class TestParseArgs:

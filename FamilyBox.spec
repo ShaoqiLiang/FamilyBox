@@ -2,9 +2,9 @@
 
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
-    binaries=[('familybox/familybox_core.dll', 'familybox')],
+    ['src/window/main.py'],
+    pathex=['src'],
+    binaries=[('src/window/familybox_core.dll', 'familybox')],
     datas=[('rom/super-mario-bros.nes', 'rom')],
     hiddenimports=['pygame'],
     hookspath=[],

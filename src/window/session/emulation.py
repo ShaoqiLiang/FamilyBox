@@ -17,7 +17,7 @@ from typing import Any
 
 import pygame
 
-from familybox.core_api import NesCore
+from window.binding.core_api import NesCore
 
 SoundFactory = Callable[[bytes], Any]
 _REGION_IDS = {"ntsc": 0, "pal": 1}

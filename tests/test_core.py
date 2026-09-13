@@ -7,8 +7,8 @@ from collections.abc import Generator
 
 import pytest
 
-import familybox.core_api as core_api
-from familybox.core_api import NesCore
+import window.binding.core_api as core_api
+from window.binding.core_api import NesCore
 
 ROM = "rom/super-mario-bros.nes"
 

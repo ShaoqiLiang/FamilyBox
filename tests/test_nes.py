@@ -7,7 +7,7 @@ from collections.abc import Generator
 import pygame
 import pytest
 
-from familybox.nes import NES
+from window.frontends.pygame_frontend import NES
 
 ROM_PATH = "rom/super-mario-bros.nes"
 
@@ -129,7 +129,7 @@ class TestAudioPump:
     FRAME = 734  # mono samples per core frame
 
     def _pump(self, channels: int = 1) -> tuple[object, _FakeChannel, list[bytes]]:
-        from familybox.session import AudioPump as _AudioPump
+        from window.session import AudioPump as _AudioPump
 
         ch = _FakeChannel()
         data: list[bytes] = []

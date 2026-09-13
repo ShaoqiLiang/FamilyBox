@@ -11,8 +11,8 @@ from typing import Any
 
 import pygame
 
-from familybox.core_api import _LIB_PATH
-from familybox.session import EmulationSession
+from window.binding.core_api import _LIB_PATH
+from window.session import EmulationSession
 
 log = logging.getLogger(__name__)
 
@@ -101,8 +101,8 @@ def _debug_on() -> bool:
 
 
 def _log_dir() -> Path:
-    # project root / build / log  (works from source and typical venv layout)
-    here = Path(__file__).resolve().parent.parent
+    # repo root / build / log  (works from source and typical venv layout)
+    here = Path(__file__).resolve().parents[3]
     d = here / "build" / "log"
     d.mkdir(parents=True, exist_ok=True)
     return d

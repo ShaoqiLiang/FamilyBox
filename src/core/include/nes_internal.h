@@ -211,6 +211,11 @@ typedef struct Nes
     int last_s0_scanline;
 } Nes;
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 /* bus.c */
 uint8_t cpu_read(Nes *n, uint16_t addr);
 void cpu_write(Nes *n, uint16_t addr, uint8_t v);
@@ -243,5 +248,9 @@ void cart_free(Nes *n);
 /* controller.c */
 void controller_write(Nes *n, uint8_t v);
 uint8_t controller_read(Nes *n);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* NES_INTERNAL_H */
