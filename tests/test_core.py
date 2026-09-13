@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Generator
 
 import pytest
 
+import familybox.core_api as core_api
 from familybox.core_api import NesCore
 
 ROM = "rom/super-mario-bros.nes"
@@ -29,6 +31,43 @@ class TestLoad:
         c = NesCore()
         assert c.load_rom("rom/does-not-exist.nes") != 0
         c.close()
+
+
+class TestAbiHandshake:
+    """Design doc §5: reject stale DLLs at load time via nes_abi_version()."""
+
+    def test_version_matches_binding(self) -> None:
+        c = NesCore()
+        try:
+            assert c.abi_version() == core_api.REQUIRED_ABI_VERSION
+        finally:
+            c.close()
+
+    def test_version_mismatch_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(core_api, "REQUIRED_ABI_VERSION", 999)
+        with pytest.raises(RuntimeError, match="ABI version mismatch"):
+            NesCore()
+
+
+class TestZeroCopyVideo:
+    """Design doc §4.2/§5: run_frame returns a live view over the core's
+    internal frame buffer (no per-frame 184 KB copy)."""
+
+    def test_view_is_live_not_snapshot(self, core: NesCore) -> None:
+        v, _ = core.run_frame()
+        h1 = hashlib.sha256(v).hexdigest()
+        for f in range(2, 80):
+            core.set_buttons(0x08 if f < 70 else 0x00)
+            core.run_frame()
+        h80 = hashlib.sha256(v).hexdigest()
+        # same Python object now reflects frame 80's content -> live view
+        assert h1 != h80
+
+    def test_view_shape_contract(self, core: NesCore) -> None:
+        v, _ = core.run_frame()
+        assert len(v) == 256 * 240 * 3
+        assert v.format in ("B", "<B")
+        assert not v.readonly
 
 
 class TestFrame:
