@@ -21,7 +21,9 @@ set MODE=release
 set TRACE=0
 set HEADLESS=
 rem Default cartridge: verified NTSC original (PAL EU copy kept at rom\super-mario-bros.nes)
-set ROMARG=rom\super-mario-bros-ntsc.nes
+rem default: no cartridge - land on the loader UI first
+rem (open via menu File>Open / drag & drop / O key)
+set ROMARG=
 
 if /i "%~1"=="headless" (
   set HEADLESS=--headless

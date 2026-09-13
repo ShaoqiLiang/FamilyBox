@@ -8,11 +8,15 @@ from window.main import parse_args
 class TestParseArgs:
     """Command-line argument parsing tests."""
 
-    def test_rom_defaults_to_bundled(self) -> None:
-        """No args: uses bundled super-mario-bros.nes if present."""
+    def test_rom_defaults_to_none_loader_mode(self) -> None:
+        """No args: no cartridge -> the frontend opens the loader UI."""
         args = parse_args([])
-        assert args.rom is not None
-        assert args.rom.endswith("super-mario-bros.nes")
+        assert args.rom is None
+
+    def test_empty_rom_arg_is_none(self) -> None:
+        """Empty string (run.bat 传空) also means loader mode."""
+        args = parse_args([""])
+        assert args.rom is None
 
     def test_rom_path(self) -> None:
         """ROM path is parsed correctly."""

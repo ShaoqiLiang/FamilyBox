@@ -9,24 +9,8 @@
 import argparse
 import logging
 import sys
-from pathlib import Path
 
 from window.frontends.pygame_frontend import NES
-
-
-def _default_rom() -> str | None:
-    """Bundled ROM next to the package / in PyInstaller _MEIPASS."""
-    candidates = []
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-        candidates.append(base / "rom" / "super-mario-bros.nes")
-        candidates.append(Path(sys.executable).parent / "rom" / "super-mario-bros.nes")
-    here = Path(__file__).resolve().parents[2]
-    candidates.append(here / "rom" / "super-mario-bros.nes")
-    for p in candidates:
-        if p.is_file():
-            return str(p)
-    return None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -38,7 +22,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "rom",
         nargs="?",
         default=None,
-        help="Path to .nes ROM file (default: bundled super-mario-bros.nes)",
+        help="Path to .nes ROM file (omit to open the cartridge-loader UI)",
     )
     parser.add_argument(
         "--headless",
@@ -59,10 +43,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Logging level (default: WARNING)",
     )
     args = parser.parse_args(argv)
-    if args.rom is None:
-        args.rom = _default_rom()
-        if args.rom is None:
-            parser.error("No ROM given and bundled super-mario-bros.nes not found")
+    if args.rom == "":
+        args.rom = None
     return args
 
 

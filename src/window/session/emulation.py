@@ -158,7 +158,7 @@ class EmulationSession:
 
     def __init__(
         self,
-        rom_path: str | Path,
+        rom_path: str | Path | None,
         *,
         region: str = "ntsc",
         channel: Any = None,
@@ -173,10 +173,10 @@ class EmulationSession:
         self._clock_fn = clock
         self._core = NesCore()
         self._core.set_timing(_REGION_IDS[region])
-        rc = self._core.load_rom(str(rom_path))
-        if rc != 0:
-            raise FileNotFoundError(f"Failed to load ROM ({rc}): {rom_path}")
-        self._core.reset()
+        self._cart_loaded = False
+        if rom_path is not None:
+            if not self.load_rom(rom_path):
+                raise FileNotFoundError(f"Failed to load ROM: {rom_path}")
         self._pump: AudioPump | None = (
             AudioPump(channel, channels=channels, sound_factory=sound_factory)
             if channel is not None
@@ -189,6 +189,33 @@ class EmulationSession:
             self._frame_seconds = (341 * 312 * 5 / 16) / 1662607  # ~1/50.007 s
         else:
             self._frame_seconds = (341 * 262 / 3) / 1789773  # ~1/60.0988 s
+
+    def set_region(self, region: str) -> None:
+        """切换时序标准并复位（菜单"模拟 > 时序标准"）。区域属核心时序配置，
+        切换即重启当前游戏。"""
+        if region not in _REGION_IDS:
+            raise ValueError(f"unknown region {region!r} (use 'ntsc' or 'pal')")
+        self._region = region
+        self._core.set_timing(_REGION_IDS[region])
+        if region == "pal":
+            self._frame_seconds = (341 * 312 * 5 / 16) / 1662607  # ~1/50.007 s
+        else:
+            self._frame_seconds = (341 * 262 / 3) / 1789773  # ~1/60.0988 s
+        self._core.reset()
+
+    @property
+    def cart_loaded(self) -> bool:
+        """False until a cartridge loads — frontend shows the loader UI."""
+        return self._cart_loaded
+
+    def load_rom(self, rom_path: str | Path) -> bool:
+        """Load (or hot-swap) a cartridge and reset. False if the core rejects it."""
+        rc = self._core.load_rom(str(rom_path))
+        if rc != 0:
+            return False
+        self._core.reset()
+        self._cart_loaded = True
+        return True
 
     @property
     def core(self) -> NesCore:
@@ -209,8 +236,13 @@ class EmulationSession:
     def set_buttons(self, buttons: int) -> None:
         self._core.set_buttons(buttons & 0xFF)
 
-    def step(self) -> tuple[memoryview, bytes]:
-        """Run one frame, feed audio, hold the native cadence."""
+    def step(self) -> tuple[memoryview | None, bytes]:
+        """Run one frame, feed audio, hold the native cadence.
+
+        Without a cartridge loaded this only paces and returns (None, b"").
+        """
+        if not self._cart_loaded:
+            return None, b""
         rgb, pcm = self._core.run_frame()
         now = self._clock_fn()
         if self._pump is not None and pcm:
