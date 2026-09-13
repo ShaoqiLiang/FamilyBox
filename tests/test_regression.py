@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from familybox.core_api import NesCore
-from familybox.session import EmulationSession
+from window.binding.core_api import NesCore
+from window.session import EmulationSession
 
 ROM_PATH = "rom/super-mario-bros.nes"  # tracked PAL EU cartridge
 ROM_NTSC = "rom/super-mario-bros-ntsc.nes"  # local NTSC copy (gitignored)

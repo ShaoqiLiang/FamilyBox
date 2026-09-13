@@ -352,8 +352,7 @@ void apu_tick(Nes *n, int cpu_cycles, int16_t *pcm, int max_samples, int *out_co
     int steps4_pal[] = {8314, 16628, 24942, 33256};
     int steps5_pal[] = {8314, 16628, 24942, 33256, 41570};
     int pal = n->timing.region == 1;
-    int *steps = a->frame_mode ? (pal ? steps5_pal : steps5_ntsc)
-                               : (pal ? steps4_pal : steps4_ntsc);
+    int *steps = a->frame_mode ? (pal ? steps5_pal : steps5_ntsc) : (pal ? steps4_pal : steps4_ntsc);
     int max_steps = a->frame_mode ? 5 : 4;
 
     while (a->frame_step < max_steps && a->frame_counter >= steps[a->frame_step])

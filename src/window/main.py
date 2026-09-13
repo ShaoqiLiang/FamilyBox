@@ -11,7 +11,7 @@ import logging
 import sys
 from pathlib import Path
 
-from familybox.nes import NES
+from window.frontends.pygame_frontend import NES
 
 
 def _default_rom() -> str | None:
@@ -21,7 +21,7 @@ def _default_rom() -> str | None:
         base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
         candidates.append(base / "rom" / "super-mario-bros.nes")
         candidates.append(Path(sys.executable).parent / "rom" / "super-mario-bros.nes")
-    here = Path(__file__).resolve().parent.parent
+    here = Path(__file__).resolve().parents[2]
     candidates.append(here / "rom" / "super-mario-bros.nes")
     for p in candidates:
         if p.is_file():
@@ -74,8 +74,8 @@ def main(argv: list[str] | None = None) -> None:
         level=getattr(logging, args.log_level),
         format="%(levelname)s:%(name)s:%(message)s",
     )
-    from familybox.core_api import NesCore, _LIB_PATH
-    from familybox.nes import _debug_on
+    from window.binding.core_api import NesCore, _LIB_PATH
+    from window.frontends.pygame_frontend import _debug_on
 
     # Always show build flavour so it's obvious which DLL is loaded
     try:

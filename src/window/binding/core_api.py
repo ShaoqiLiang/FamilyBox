@@ -28,7 +28,7 @@ def _find_lib() -> Path:
         ):
             if cand.exists():
                 return cand
-    return Path(__file__).resolve().parent / _LIB_NAME
+    return Path(__file__).resolve().parents[1] / _LIB_NAME
 
 
 _LIB_PATH = _find_lib()

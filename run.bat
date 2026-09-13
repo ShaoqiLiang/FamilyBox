@@ -63,7 +63,7 @@ set RUNLOG=%LOGDIR%\run_!TS!.log
 set SESSIONLOG=%LOGDIR%\session.log
 
 echo [1/2] Rebuilding C core (!MODE!)...
-call familybox\build.bat !MODE!
+call scripts\build.bat !MODE!
 if errorlevel 1 (
   echo BUILD FAILED
   pause
@@ -89,12 +89,14 @@ echo ===== RUN !TS! mode=!MODE! trace=!TRACE! headless=!HEADLESS! rom=!ROMARG! =
 
 rem powershell exit code == uv/python exit code via `exit $LASTEXITCODE`
 rem ($global:LASTEXITCODE=1 first so a missing uv cannot slip through as success)
+rem src/ 布局：包根在 src\familybox，PYTHONPATH 指过去（无需安装型构建）
+set "PYTHONPATH=%~dp0src"
 if "!TRACE!"=="1" (
   rem trace output is huge - no per-line tee, no powershell (its ">>" writes
   rem UTF-16); raw cmd redirect keeps the runlog plain text and grep-able
-  uv run python main.py !HEADLESS! "!ROMARG!" >> "!RUNLOG!" 2>&1
+  uv run python -m window.main !HEADLESS! "!ROMARG!" >> "!RUNLOG!" 2>&1
 ) else (
-  powershell -NoProfile -Command "$global:LASTEXITCODE=1; $ErrorActionPreference='Continue'; & uv run python main.py !HEADLESS! '!ROMARG!' 2>&1 | ForEach-Object { Write-Host $_; Add-Content -Path '!SESSIONLOG!' -Value $_ -Encoding UTF8; Add-Content -Path '!RUNLOG!' -Value $_ -Encoding UTF8 }; exit $LASTEXITCODE"
+  powershell -NoProfile -Command "$global:LASTEXITCODE=1; $ErrorActionPreference='Continue'; & uv run python -m window.main !HEADLESS! '!ROMARG!' 2>&1 | ForEach-Object { Write-Host $_; Add-Content -Path '!SESSIONLOG!' -Value $_ -Encoding UTF8; Add-Content -Path '!RUNLOG!' -Value $_ -Encoding UTF8 }; exit $LASTEXITCODE"
 )
 
 if %errorlevel% NEQ 0 (

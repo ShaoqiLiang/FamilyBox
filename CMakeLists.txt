@@ -1,8 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
-project(familybox_core LANGUAGES C)
+project(familybox_core LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+# Core language: C++ (decision doc/find/2026-09-13T14-41-41.md) — window
+# C++11-C++20, pinned here to the ceiling. No C++23+ features allowed.
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
 option(FB_DEBUG "Enable FamilyBox debug logging" OFF)
@@ -15,7 +20,7 @@ else()
   endif()
 endif()
 
-set(FB_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/familybox")
+set(FB_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/window")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${FB_OUTPUT_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${FB_OUTPUT_DIR}")
 
@@ -30,4 +35,4 @@ else()
   file(REMOVE "${FB_OUTPUT_DIR}/.fb_debug")
 endif()
 
-add_subdirectory(core)
+add_subdirectory(src/core)
