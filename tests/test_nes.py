@@ -356,15 +356,102 @@ class TestMenuActions:
         assert n._screen.get_size() == (512, 480)
         n.close()
 
-    def test_help_dialogs_route_through_message_box(
+    def test_keys_help_routes_through_message_box(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         n = NES(ROM_PATH)
         boxes: list[tuple[str, str]] = []
         monkeypatch.setattr(n, "_message_box", lambda t, x: boxes.append((t, x)))
         self._dispatch(n, Action.KEYS_HELP)
-        self._dispatch(n, Action.ABOUT)
-        assert len(boxes) == 2
+        assert len(boxes) == 1
         assert boxes[0][0] == "按键说明"
-        assert "FamilyBox" in boxes[1][0]
         n.close()
+
+    def test_about_shows_task_dialog_and_copy_copies_body(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """[复制] 返回时,About 全文(含仓库地址与构建日期)应写入剪贴板。"""
+        from window.frontends import task_dialog
+        from window.frontends.pygame_frontend import ID_ABOUT_COPY
+
+        n = NES(ROM_PATH)
+        shown: list[tuple[str, str, str, list[tuple[int, str]]]] = []
+        copied: list[str] = []
+
+        def fake_show(
+            owner: int,
+            title: str,
+            main_instruction: str,
+            content: str,
+            buttons: list[tuple[int, str]],
+            default_button_id: int,
+            error_icon: bool = False,
+            copy_button_id: int | None = None,
+            debug: bool = False,
+        ) -> int:
+            shown.append((title, main_instruction, content, buttons))
+            return ID_ABOUT_COPY
+
+        monkeypatch.setattr(task_dialog, "show_task_dialog", fake_show)
+        monkeypatch.setattr(n, "_copy_to_clipboard", lambda t: copied.append(t))
+        self._dispatch(n, Action.ABOUT)
+        assert shown and shown[0][0] == "关于 FamilyBox"
+        assert shown[0][1] == "FamilyBox v0.1.0"  # 首行作主指令
+        assert "构建日期" in shown[0][2]
+        assert "https://github.com/ShaoqiLiang/FamilyBox" in shown[0][2]
+        assert copied and "https://github.com/ShaoqiLiang/FamilyBox" in copied[0]
+        assert "FamilyBox v0.1.0" in copied[0]
+        n.close()
+
+
+class TestWindowIcon:
+    """D1：图标注入时序——set_mode 前首设，display 重建后重设。"""
+
+    @staticmethod
+    def _ensure_decrypted_icon() -> None:
+        """运行时只读明文——测试现场把 icon.png.enc 解密到 build/assets。"""
+        import sys
+
+        repo = Path(__file__).resolve().parents[1]
+        sys.path.insert(0, str(repo / "scripts"))
+        from fbenc import decrypt_bytes
+
+        from window.resources import asset_path
+
+        enc = asset_path("assets/icon.png.enc")
+        out = repo / "build" / "assets" / "icon.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(decrypt_bytes(enc.read_bytes()))
+
+    def test_icon_set_before_set_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._ensure_decrypted_icon()
+        calls: list[str] = []
+        real_set_mode = pygame.display.set_mode
+
+        def fake_set_mode(*a: object, **k: object) -> pygame.Surface:
+            calls.append("set_mode")
+            return real_set_mode(*a, **k)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(pygame.display, "set_mode", fake_set_mode)
+        monkeypatch.setattr(
+            pygame.display, "set_icon", lambda s: calls.append("set_icon")
+        )
+        n = NES(ROM_PATH, headless=False)
+        n.close()
+        assert "set_icon" in calls and "set_mode" in calls
+        assert calls.index("set_icon") < calls.index("set_mode")
+
+    def test_icon_reapplied_after_maximize(
+        self, windowed_nes: NES, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._ensure_decrypted_icon()
+        calls: list[int] = []
+        monkeypatch.setattr(pygame.display, "set_icon", lambda s: calls.append(1))
+        pygame.event.post(pygame.event.Event(pygame.WINDOWMAXIMIZED))
+        windowed_nes._handle_events()
+        assert len(calls) >= 1
+
+    def test_headless_never_touches_icon(self, nes: NES) -> None:
+        # headless 构造已完成——能走到这里即说明无显示操作；图标方法自身也须直通
+        nes._apply_window_icon()  # 不抛即通过
+        assert nes._screen is None

@@ -51,10 +51,14 @@ STRINGS: dict[str, dict[str, str]] = {
             "ESC：退出全屏/最大化"
         ),
         "dlg.about.title": "关于 FamilyBox",
+        "dlg.ok": "确定",
+        "dlg.copy": "复制",
         "dlg.about.body": (
             "FamilyBox v0.1.0\n"
             "FC/NES 模拟器（C++20 核心 + Python 界面）\n"
             "作者：ShaoqiLiang\n"
+            "GitHub：https://github.com/ShaoqiLiang/FamilyBox\n"
+            "构建日期：{build}\n"
             "\n"
             "请使用自备的合法卡带转储文件。"
         ),
@@ -124,10 +128,14 @@ STRINGS: dict[str, dict[str, str]] = {
             "ESC: leave fullscreen/maximized"
         ),
         "dlg.about.title": "About FamilyBox",
+        "dlg.ok": "OK",
+        "dlg.copy": "Copy",
         "dlg.about.body": (
             "FamilyBox v0.1.0\n"
             "FC/NES emulator (C++20 core + Python UI)\n"
             "Author: ShaoqiLiang\n"
+            "GitHub: https://github.com/ShaoqiLiang/FamilyBox\n"
+            "Build date: {build}\n"
             "\n"
             "Please use your own legally dumped cartridges.\n"
             "For learning and personal use only."
