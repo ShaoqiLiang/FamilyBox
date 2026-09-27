@@ -5,7 +5,7 @@ cd /d "%~dp0"
 rem Package FamilyBox onedir EXE.
 rem 1) Always rebuild C core (release) so package matches a fresh run.bat core.
 rem 2) PyInstaller freeze.
-rem 3) Embed integrity manifest (S2a) — RSA-signed, runtime self-check via Help menu.
+rem 3) Embed integrity manifest (S2a) - RSA-signed, runtime self-check via Help menu.
 rem 4) SHA256 compare src\window\familybox_core.dll vs packaged DLL.
 
 echo [1/6] Force rebuild C core (release)...
