@@ -1,6 +1,7 @@
 [project]
 name = "familybox"
-version = "0.1.0"
+# 版本唯一来源:src/Version.ini(改后手动同步此处)
+version = "0.1.0.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"

@@ -54,7 +54,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "dlg.ok": "确定",
         "dlg.copy": "复制",
         "dlg.about.body": (
-            "FamilyBox v0.1.0\n"
+            "FamilyBox v{ver}\n"
             "FC/NES 模拟器（C++20 核心 + Python 界面）\n"
             "作者：ShaoqiLiang\n"
             "GitHub：https://github.com/ShaoqiLiang/FamilyBox\n"
@@ -131,7 +131,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "dlg.ok": "OK",
         "dlg.copy": "Copy",
         "dlg.about.body": (
-            "FamilyBox v0.1.0\n"
+            "FamilyBox v{ver}\n"
             "FC/NES emulator (C++20 core + Python UI)\n"
             "Author: ShaoqiLiang\n"
             "GitHub: https://github.com/ShaoqiLiang/FamilyBox\n"

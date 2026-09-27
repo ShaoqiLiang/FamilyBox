@@ -30,10 +30,11 @@ def plain_video(tmp_path: Path) -> Path:
 @pytest.fixture()
 def dummy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
-    if not pygame.get_init():
-        pygame.init()
+    pygame.init()
+    pygame.display.init()  # 上一个用例 teardown 可能 quit 过,必须确保就绪
     yield
     pygame.display.quit()
+    pygame.display.init()  # 留给后续用例
 
 
 class TestPlayLogoVideo:

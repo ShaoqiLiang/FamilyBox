@@ -10,6 +10,7 @@ import pytest
 
 from window.frontends.menu_bar import Action
 from window.frontends.pygame_frontend import NES
+from window.resources import get_version
 
 ROM_PATH = "rom/super-mario-bros.nes"
 
@@ -396,11 +397,13 @@ class TestMenuActions:
         monkeypatch.setattr(n, "_copy_to_clipboard", lambda t: copied.append(t))
         self._dispatch(n, Action.ABOUT)
         assert shown and shown[0][0] == "关于 FamilyBox"
-        assert shown[0][1] == "FamilyBox v0.1.0"  # 首行作主指令
+        assert (
+            shown[0][1] == f"FamilyBox v{get_version()}"
+        )  # 主指令版本来自 src/Version.ini
         assert "构建日期" in shown[0][2]
         assert "https://github.com/ShaoqiLiang/FamilyBox" in shown[0][2]
         assert copied and "https://github.com/ShaoqiLiang/FamilyBox" in copied[0]
-        assert "FamilyBox v0.1.0" in copied[0]
+        assert f"FamilyBox v{get_version()}" in copied[0]
         n.close()
 
 

@@ -15,7 +15,7 @@ import pygame
 from window.binding.core_api import _LIB_PATH
 from window.frontends.menu_bar import Action, MenuBar
 from window.localization import tr
-from window.resources import asset_path
+from window.resources import asset_path, get_version
 from window.session import EmulationSession
 from window.splash import play_logo_video
 
@@ -470,7 +470,12 @@ class NES:
             )
         elif act == Action.ABOUT:
             title = tr(self._lang, "dlg.about.title")
-            full = tr(self._lang, "dlg.about.body", build=self._build_date())
+            full = tr(
+                self._lang,
+                "dlg.about.body",
+                build=self._build_date(),
+                ver=get_version(),
+            )
             head, _, content = full.partition("\n")  # 首行作 TaskDialog 主指令
             buttons = [
                 (ID_ABOUT_COPY, tr(self._lang, "dlg.copy")),

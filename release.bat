@@ -43,6 +43,7 @@ uv run pyinstaller --noconfirm --clean ^
   --icon "build\assets\familybox.ico" ^
   --add-data "build\assets;assets" ^
   --add-data "src\window\assets\GitHub_Lockup_Black.png;assets" ^
+  --add-data "src\Version.ini;." ^
   --add-binary "src\window\familybox_core.dll;familybox" ^
   --hidden-import pygame ^
   --paths src ^
