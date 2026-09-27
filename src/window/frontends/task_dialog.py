@@ -11,8 +11,10 @@ from __future__ import annotations
 import ctypes
 import sys
 import tempfile
+import threading
 from ctypes import wintypes
 from pathlib import Path
+from typing import Any, Callable
 
 if sys.platform != "win32":  # pragma: no cover - 平台守卫
     raise ImportError("task_dialog is Windows-only")
@@ -27,6 +29,12 @@ TDF_ALLOW_DIALOG_CANCELLATION = 0x8
 TD_ERROR_ICON = -2  # MAKEINTRESOURCEW(-2),commctrl.h 定义
 TDN_BUTTON_CLICKED = 2  # TaskDialog 回调消息:wp = 被点按钮 ID
 TDM_SET_BUTTON_TEXT = 0x472  # WM_USER + 114
+TDM_CLICK_BUTTON = 0x466  # WM_USER + 102
+TDM_SET_PROGRESS_BAR_RANGE = 0x469  # WM_USER + 105
+TDM_SET_PROGRESS_BAR_POS = 0x46A  # WM_USER + 106
+TDF_SHOW_PROGRESS_BAR = 0x200
+TDN_CREATED = 0  # TaskDialog 回调消息:对话框构造完成
+IDCANCEL = 2
 S_OK, S_FALSE = 0, 1  # 回调返回 S_FALSE = 阻止对话框关闭
 
 _MANIFEST = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -251,6 +259,76 @@ def show_task_dialog(
             flush=True,
         )
     return pn.value if hr == 0 else -1
+
+
+def show_progress_dialog(
+    owner: int,
+    title: str,
+    heading: str,
+    work: Callable[[Callable[[int], None]], Any],
+    cancel_text: str = "取消",
+    debug: bool = False,
+) -> tuple[int, Any]:
+    """模态进度对话框：work(progress) 在后台线程执行，进度条 0-100。
+
+    work 接收 progress(pct: int)（0-100，跨线程 PostMessage 进度条），
+    其返回值原样带回。完成/异常后自动点「取消」ID 关闭对话框：
+    返回 (被点按钮 ID, work 结果)。用户提前取消或 work 抛异常时结果为 None
+    （work 会在后台跑完，结果被丢弃）。
+    """
+    _ensure_comctl32_v6(debug)
+    cc = comctl32
+    assert cc is not None
+    holder: dict[str, Any] = {"report": None}
+    config = TASKDIALOGCONFIG()
+    config.cbSize = ctypes.sizeof(TASKDIALOGCONFIG)
+    config.hwndParent = wintypes.HWND(owner) if owner else None
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SHOW_PROGRESS_BAR
+    config.pszWindowTitle = title
+    config.pszMainInstruction = heading
+    config.pszContent = ""
+    arr = (TASKDIALOG_BUTTON * 1)()
+    arr[0].nButtonID = IDCANCEL
+    arr[0].pszButtonText = cancel_text
+    config.cButtons = 1
+    config.pButtons = arr
+    config.nDefaultButton = IDCANCEL
+
+    def _taskdialog_callback(hwnd: int, msg: int, wp: int, lp: int, ref: int) -> int:
+        if msg != TDN_CREATED or not hwnd:
+            return S_OK
+        # 范围 0-100：MAKELPARAM(min, max) = (max << 16) | min
+        user32.SendMessageW(hwnd, TDM_SET_PROGRESS_BAR_RANGE, 0, (100 << 16))
+
+        def worker() -> None:
+            try:
+                holder["report"] = work(
+                    lambda pct: user32.PostMessageW(
+                        hwnd, TDM_SET_PROGRESS_BAR_POS, max(0, min(100, int(pct))), 0
+                    )
+                )
+            except Exception as e:  # 结果折叠为 None，不阻断关闭
+                if debug:
+                    print(f"[TD] progress work error: {e}", flush=True)
+            finally:
+                user32.PostMessageW(hwnd, TDM_CLICK_BUTTON, IDCANCEL, 0)
+
+        threading.Thread(target=worker, daemon=True, name="fb-td-progress").start()
+        return S_OK
+
+    cbref = PFTASKDIALOGCALLBACK(_taskdialog_callback)  # 模态期间保活
+    config.pfCallback = cbref
+
+    if debug:
+        print(f"[TD] progress call: owner={owner} heading={heading!r}", flush=True)
+    pn = ctypes.c_int(-1)
+    hr = cc.TaskDialogIndirect(ctypes.byref(config), ctypes.byref(pn), None, None)
+    if debug:
+        print(
+            f"[TD] progress result: hr=0x{hr & 0xFFFFFFFF:08X} clicked={pn.value}",
+            flush=True,
+        )
+    return (pn.value if hr == 0 else -1), holder["report"]
 
 
 def copy_to_clipboard(hwnd: int, text: str, debug: bool = False) -> None:

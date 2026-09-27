@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -177,8 +176,6 @@ class NES:
         self._muted = False
         self._scale = 3
         self._menu = MenuBar()
-        self._verify_job: dict[str, Any] | None = None  # S2a 完整性验证后台任务
-        self._verify_veil: pygame.Surface | None = None  # 遮罩缓存（尺寸变化才重建）
 
         if not headless:
             pygame.init()
@@ -310,17 +307,14 @@ class NES:
                     self._running = False
                     break
                 self._present_no_cart()
-                self._poll_verify_job()
                 continue
             if self._paused:
                 if not self._headless:
                     self._present(paused=True)
-                    self._poll_verify_job()
                 continue
             self._run_frame()
             if not self._headless:
                 self._present()
-                self._poll_verify_job()
                 # pacing (native frame cadence on the audio clock) happens
                 # inside session.step() — no wall-clock tick here.
 
@@ -518,55 +512,27 @@ class NES:
         copy_to_clipboard(self._get_hwnd(), text, debug=self._debug)
 
     def _verify_integrity(self) -> None:
-        """帮助菜单「完整性验证」(S2a)：后台线程验证，进度遮罩 + 结果弹窗。"""
-        if self._verify_job is not None or self._headless:
-            return
-        job: dict[str, Any] = {"done": 0, "total": 0, "report": None}
-        self._verify_job = job
+        """帮助菜单「完整性验证」(S2a)：原生进度对话框 + 结果弹窗。"""
+        from window.frontends.task_dialog import show_progress_dialog
+        from window.integrity import verify_installation
 
-        def work() -> None:
-            from window.integrity import verify_installation
+        def work(report_progress: Callable[[int], None]) -> Any:
+            def to_pct(done: int, total: int) -> None:
+                if total > 0:
+                    report_progress(min(100, int(done * 100 / total)))
 
-            job["report"] = verify_installation(
-                progress=lambda done, total: job.update(done=done, total=total)
-            )
+            return verify_installation(progress=to_pct)
 
-        threading.Thread(target=work, daemon=True, name="fb-verify").start()
-
-    def _poll_verify_job(self) -> None:
-        """主循环每帧调用：验证结束即清场并弹结果框（遮罩由 _present* 合成）。"""
-        job = self._verify_job
-        if job is not None and job["report"] is not None:
-            self._verify_job = None
-            self._show_verify_result(job["report"])
-
-    def _compose_verify_overlay(self, surface: pygame.Surface) -> None:
-        """把进度遮罩合成进当前帧——在 _present* 的 flip 之前调用。
-
-        不能自翻屏：_present 已 flip 过一次再翻会以帧率闪烁（2026-09-28 踩坑）。
-        """
-        if self._font is None:
-            return
-        w, h = surface.get_size()
-        if self._verify_veil is None or self._verify_veil.get_size() != (w, h):
-            self._verify_veil = pygame.Surface((w, h), pygame.SRCALPHA)
-            self._verify_veil.fill((8, 12, 24, 160))
-        surface.blit(self._verify_veil, (0, 0))
-        bw, bh = min(480, w - 80), 22
-        bx, by = (w - bw) // 2, h // 2 - 40
-        pygame.draw.rect(surface, (96, 108, 140), (bx - 2, by - 2, bw + 4, bh + 4), 2)
-        job = self._verify_job or {}
-        done, total = int(job.get("done", 0)), int(job.get("total", 0))
-        pct = 0 if total <= 0 else max(0.0, min(1.0, done / total))
-        if pct > 0:
-            pygame.draw.rect(
-                surface, (110, 200, 120), (bx, by, max(1, int(bw * pct)), bh)
-            )
-        label = tr(self._lang, "dlg.verify.progress")
-        if total > 0:
-            label += f"  {pct * 100:.0f}%"
-        img = self._font.render(label, True, (220, 224, 236))
-        surface.blit(img, img.get_rect(midbottom=(w // 2, by - 12)))
+        _clicked, report = show_progress_dialog(
+            self._get_hwnd(),
+            title=tr(self._lang, "dlg.verify.title"),
+            heading=tr(self._lang, "dlg.verify.progress"),
+            work=work,
+            cancel_text=tr(self._lang, "dlg.cancel"),
+            debug=self._debug,
+        )
+        if report is not None:
+            self._show_verify_result(report)
 
     def _show_verify_result(self, report: Any) -> None:
         title = tr(self._lang, "dlg.verify.title")
@@ -690,8 +656,6 @@ class NES:
                     center=(self._screen.get_width() // 2, 200 + i * 44)
                 )
                 self._screen.blit(img, rect)
-        if self._verify_job is not None and self._screen is not None:
-            self._compose_verify_overlay(self._screen)
         pygame.display.flip()
 
     def _debug_dump(self) -> None:
@@ -839,8 +803,6 @@ class NES:
                 self._screen.blit(img, (12, self._screen.get_height() - 40))
             else:
                 self._osd_text = None
-        if self._verify_job is not None and self._screen is not None:
-            self._compose_verify_overlay(self._screen)
         pygame.display.flip()
 
     def _enter_maximized(self) -> None:

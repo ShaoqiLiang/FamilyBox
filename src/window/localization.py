@@ -55,6 +55,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "dlg.about.title": "关于 FamilyBox",
         "dlg.ok": "确定",
         "dlg.copy": "复制",
+        "dlg.cancel": "取消",
         "dlg.about.body": (
             "FamilyBox v{ver}\n"
             "FC/NES 模拟器（C++20 核心 + Python 界面）\n"
@@ -155,6 +156,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "dlg.about.title": "About FamilyBox",
         "dlg.ok": "OK",
         "dlg.copy": "Copy",
+        "dlg.cancel": "Cancel",
         "dlg.about.body": (
             "FamilyBox v{ver}\n"
             "FC/NES emulator (C++20 core + Python UI)\n"
