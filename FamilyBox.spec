@@ -5,7 +5,7 @@ a = Analysis(
     ['src/window/main.py'],
     pathex=['src'],
     binaries=[('src/window/familybox_core.dll', 'familybox')],
-    datas=[('build/assets', 'assets')],
+    datas=[('build/assets', 'assets'), ('src/window/assets/GitHub_Lockup_Black.png', 'assets'), ('src/Version.ini', '.')],
     hiddenimports=['pygame'],
     hookspath=[],
     hooksconfig={},

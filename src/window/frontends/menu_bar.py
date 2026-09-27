@@ -49,6 +49,8 @@ class Action(IntEnum):
     SCALE_4 = 153
     KEYS_HELP = 160
     ABOUT = 161
+    VERIFY_INTEGRITY = 162
+    CHECK_UPDATE = 163
 
 
 # 构建 spec：(kind, ident, text_key, flags)
@@ -173,6 +175,9 @@ def _menu_spec(lang: str, state: dict[str, Any]) -> list[tuple]:
             [
                 ("item", Action.KEYS_HELP, "help.keys", 0),
                 ("item", Action.ABOUT, "help.about", 0),
+                ("sep", None, None, 0),
+                ("item", Action.VERIFY_INTEGRITY, "help.verify", 0),
+                ("item", Action.CHECK_UPDATE, "help.update", 0),
             ],
             "menu.help",
             0,

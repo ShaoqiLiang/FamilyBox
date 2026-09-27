@@ -95,6 +95,24 @@ Python 外壳 (src/window)                C 核心 (src/core)
        一帧 = RGB 256×240 + PCM @ ~44.1 kHz，由音频时钟节拍
 ```
 
+## 发行完整性
+
+发行物使用长期 RSA 发行密钥签名：`scripts/sign_release.py` 产出哈希清单（`<文件>.sha256`）
+与 RSA-PSS/SHA-256 签名（`<文件>.sha256.sig`），随发行物一同发布。下载后验证：
+
+```bat
+uv run python scripts\verify_release.py <下载的文件或目录>
+```
+
+验证脚本会打印所用公钥的指纹，必须与下面一致：
+
+```
+SHA256:D8AC:78BF:A2EE:4FBA:80A2:66A9:2BE3:CBFE:C8A7:24AC:D96D:68C7:4D93:6FE5:DA2B:DD5C
+```
+
+公钥：[`keys/release_public.pem`](keys/release_public.pem)（已入库）。私钥从不离开维护者本机。
+该签名清单证明出处与完整性，独立于 Windows Authenticode——MSI 本体不签名。
+
 ## 许可证
 
 基于 [GNU AGPL-3.0](LICENSE) 分发。

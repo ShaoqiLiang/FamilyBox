@@ -95,6 +95,26 @@ Python shell (src/window)                C core (src/core)
        one frame = RGB 256×240 + PCM @ ~44.1 kHz, paced by the audio clock
 ```
 
+## Release integrity
+
+Release artifacts are signed with a long-lived RSA release key: `scripts/sign_release.py`
+produces a hash manifest (`<artifact>.sha256`) plus an RSA-PSS/SHA-256 signature
+(`<artifact>.sha256.sig`) shipped alongside the download. Verify what you downloaded:
+
+```bat
+uv run python scripts\verify_release.py <downloaded file-or-dir>
+```
+
+The verifier prints the public-key fingerprint, which must match:
+
+```
+SHA256:D8AC:78BF:A2EE:4FBA:80A2:66A9:2BE3:CBFE:C8A7:24AC:D96D:68C7:4D93:6FE5:DA2B:DD5C
+```
+
+Public key: [`keys/release_public.pem`](keys/release_public.pem) (committed). The private
+key never leaves the maintainer's machine. This manifest signature proves origin and
+integrity independent of Windows Authenticode — the MSI itself ships unsigned.
+
 ## License
 
 Distributed under the [GNU AGPL-3.0](LICENSE).

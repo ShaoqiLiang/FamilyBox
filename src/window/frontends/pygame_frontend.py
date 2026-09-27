@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -176,6 +177,7 @@ class NES:
         self._muted = False
         self._scale = 3
         self._menu = MenuBar()
+        self._verify_job: dict[str, Any] | None = None  # S2a 完整性验证后台任务
 
         if not headless:
             pygame.init()
@@ -307,14 +309,17 @@ class NES:
                     self._running = False
                     break
                 self._present_no_cart()
+                self._poll_verify_job()
                 continue
             if self._paused:
                 if not self._headless:
                     self._present(paused=True)
+                    self._poll_verify_job()
                 continue
             self._run_frame()
             if not self._headless:
                 self._present()
+                self._poll_verify_job()
                 # pacing (native frame cadence on the audio clock) happens
                 # inside session.step() — no wall-clock tick here.
 
@@ -397,13 +402,13 @@ class NES:
             )
 
     @staticmethod
-    def _message_box(title: str, text: str, flags: int = 0x10) -> None:
+    def _message_box(title: str, text: str, flags: int = 0x10) -> int:
         if sys.platform == "win32":
             import ctypes
 
-            ctypes.windll.user32.MessageBoxW(
-                None, text, title, flags
-            )  # 默认 MB_ICONERROR
+            # 默认 MB_ICONERROR；返回值为被点按钮 ID（MB_YESNO 用）
+            return int(ctypes.windll.user32.MessageBoxW(None, text, title, flags))
+        return 0
 
     # -- menu actions (same handlers as hotkeys) --
 
@@ -469,12 +474,15 @@ class NES:
                 tr(self._lang, "dlg.keys.title"), tr(self._lang, "dlg.keys.body")
             )
         elif act == Action.ABOUT:
+            from window.integrity import build_commit
+
             title = tr(self._lang, "dlg.about.title")
             full = tr(
                 self._lang,
                 "dlg.about.body",
                 build=self._build_date(),
                 ver=get_version(),
+                commit=build_commit() or tr(self._lang, "build.commit.dev"),
             )
             head, _, content = full.partition("\n")  # 首行作 TaskDialog 主指令
             buttons = [
@@ -498,11 +506,128 @@ class NES:
                 self._copy_to_clipboard(full)
             elif clicked == -1:  # TaskDialog 不可用 → 原始消息框兜底
                 self._message_box(title, full)
+        elif act == Action.VERIFY_INTEGRITY:
+            self._verify_integrity()
+        elif act == Action.CHECK_UPDATE:
+            self._check_updates()
 
     def _copy_to_clipboard(self, text: str) -> None:
         from window.frontends.task_dialog import copy_to_clipboard
 
         copy_to_clipboard(self._get_hwnd(), text, debug=self._debug)
+
+    def _verify_integrity(self) -> None:
+        """帮助菜单「完整性验证」(S2a)：后台线程验证，进度遮罩 + 结果弹窗。"""
+        if self._verify_job is not None or self._headless:
+            return
+        job: dict[str, Any] = {"done": 0, "total": 0, "report": None}
+        self._verify_job = job
+
+        def work() -> None:
+            from window.integrity import verify_installation
+
+            job["report"] = verify_installation(
+                progress=lambda done, total: job.update(done=done, total=total)
+            )
+
+        threading.Thread(target=work, daemon=True, name="fb-verify").start()
+
+    def _poll_verify_job(self) -> None:
+        """主循环每帧调用：验证进行中画遮罩进度条；结束后清场并弹结果框。"""
+        job = self._verify_job
+        if job is None:
+            return
+        self._draw_verify_overlay(int(job["done"]), int(job["total"]))
+        if job["report"] is not None:
+            self._verify_job = None
+            self._show_verify_result(job["report"])
+
+    def _draw_verify_overlay(self, done: int, total: int) -> None:
+        if self._screen is None or self._font is None:
+            return
+        w, h = self._screen.get_size()
+        veil = pygame.Surface((w, h), pygame.SRCALPHA)
+        veil.fill((8, 12, 24, 160))
+        self._screen.blit(veil, (0, 0))
+        bw, bh = min(480, w - 80), 22
+        bx, by = (w - bw) // 2, h // 2 - 40
+        pygame.draw.rect(
+            self._screen, (96, 108, 140), (bx - 2, by - 2, bw + 4, bh + 4), 2
+        )
+        pct = 0 if total <= 0 else max(0.0, min(1.0, done / total))
+        if pct > 0:
+            fill = pygame.Surface((max(1, int(bw * pct)), bh))
+            fill.fill((110, 200, 120))
+            self._screen.blit(fill, (bx, by))
+        label = tr(self._lang, "dlg.verify.progress")
+        if total > 0:
+            label += f"  {pct * 100:.0f}%"
+        img = self._font.render(label, True, (220, 224, 236))
+        self._screen.blit(img, img.get_rect(midbottom=(w // 2, by - 12)))
+        pygame.display.flip()
+
+    def _show_verify_result(self, report: Any) -> None:
+        title = tr(self._lang, "dlg.verify.title")
+        if report.status == "unsigned":
+            self._message_box(title, tr(self._lang, "dlg.verify.unsigned"), 0x40)
+            return
+        if report.status == "ok":
+            self._message_box(
+                title,
+                tr(
+                    self._lang,
+                    "dlg.verify.ok",
+                    n=report.files_checked,
+                    fp=report.fingerprint,
+                ),
+                0x40,
+            )
+            return
+        shown = report.problems[:8]
+        lines = list(shown)
+        if len(report.problems) > len(shown):
+            lines.append(f"... +{len(report.problems) - len(shown)}")
+        self._message_box(
+            title,
+            tr(
+                self._lang,
+                "dlg.verify.fail",
+                n=len(report.problems),
+                problems="\n".join(lines),
+                fp=report.fingerprint,
+            ),
+        )
+
+    def _check_updates(self) -> None:
+        """帮助菜单「检查更新」(S4)：GitHub Releases 比对，询问打开发布页。"""
+        import webbrowser
+
+        from window.update_check import RELEASES_PAGE, fetch_latest
+
+        report = fetch_latest(get_version())
+        title = tr(self._lang, "dlg.update.title")
+        if report.error is not None:
+            self._message_box(
+                title, tr(self._lang, "dlg.update.error", err=report.error), 0x30
+            )
+            return
+        if not report.has_update:
+            self._message_box(
+                title, tr(self._lang, "dlg.update.latest", cur=report.current), 0x40
+            )
+            return
+        clicked = self._message_box(
+            title,
+            tr(
+                self._lang,
+                "dlg.update.found",
+                latest=report.latest,
+                cur=report.current,
+            ),
+            0x24,  # MB_ICONQUESTION | MB_YESNO
+        )
+        if clicked == 6:  # IDYES
+            webbrowser.open(RELEASES_PAGE)
 
     def _get_hwnd(self) -> int:
         """取主窗口句柄(F1):兼容 int / 十六进制串 / 'window' 键,缺失归 0。

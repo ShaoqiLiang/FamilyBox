@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -38,6 +39,7 @@ __all__ = [
     "encrypt_bytes",
     "load_private_key",
     "load_public_key",
+    "sha256_fingerprint",
 ]
 
 
@@ -49,6 +51,15 @@ def load_private_key() -> object:
 
 def load_public_key() -> object:
     return serialization.load_pem_public_key(PUBLIC_KEY_FILE.read_bytes())
+
+
+def sha256_fingerprint(public_key: object) -> str:
+    """公钥指纹（SHA256 over SPKI DER），用于 README 公示与使用者核对（S1）。"""
+    der = public_key.public_bytes(  # type: ignore[attr-defined]
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    digest = hashlib.sha256(der).hexdigest().upper()
+    return "SHA256:" + ":".join(digest[i : i + 4] for i in range(0, len(digest), 4))
 
 
 def encrypt_bytes(data: bytes) -> bytes:
