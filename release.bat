@@ -5,9 +5,10 @@ cd /d "%~dp0"
 rem Package FamilyBox onedir EXE.
 rem 1) Always rebuild C core (release) so package matches a fresh run.bat core.
 rem 2) PyInstaller freeze.
-rem 3) SHA256 compare src\window\familybox_core.dll vs packaged DLL.
+rem 3) Embed integrity manifest (S2a) — RSA-signed, runtime self-check via Help menu.
+rem 4) SHA256 compare src\window\familybox_core.dll vs packaged DLL.
 
-echo [1/4] Force rebuild C core (release)...
+echo [1/6] Force rebuild C core (release)...
 call scripts\build.bat release
 if errorlevel 1 (
   echo [ERROR] C core build failed
@@ -18,25 +19,51 @@ if not exist "src\window\familybox_core.dll" (
   exit /b 1
 )
 
-echo [2/4] Ensure PyInstaller (dev)...
+echo [2/6] Ensure PyInstaller (dev)...
 uv add --dev pyinstaller
 if errorlevel 1 exit /b 1
 
-echo [3/4] Package EXE (onedir)...
+echo [3/6] Decrypt assets to build\assets (compile-time decrypt)...
+uv run python scripts\prepare_assets.py
+if errorlevel 1 (
+  echo [ERROR] asset decrypt failed
+  exit /b 1
+)
+if not exist "build\assets\familybox.ico" (
+  echo [ERROR] familybox.ico missing after decrypt - is keys\logo_private present?
+  exit /b 1
+)
+
+echo [4/6] Package EXE (onedir)...
 rem ROM-less distribution. Launch, press O or drop a .nes to play.
+rem Decrypted plaintext lives only in build\assets (gitignored); the repo
+rem itself carries ciphertext (.enc) plus the local-only key keys\logo_private.
 uv run pyinstaller --noconfirm --clean ^
   --name FamilyBox ^
   --windowed ^
+  --icon "build\assets\familybox.ico" ^
+  --add-data "build\assets;assets" ^
+  --add-data "src\window\assets\GitHub_Lockup_Black.png;assets" ^
+  --add-data "src\Version.ini;." ^
   --add-binary "src\window\familybox_core.dll;familybox" ^
   --hidden-import pygame ^
   --paths src ^
   src\window\main.py
-if errorlevel 1 (
+set PKG_RC=%errorlevel%
+del build\familybox.ico >nul 2>&1
+if not "%PKG_RC%"=="0" (
   echo PACKAGE FAILED
   exit /b 1
 )
 
-echo [4/4] Verify packaged DLL hash...
+echo [5/6] Embed integrity manifest (S2a)...
+uv run python scripts\embed_integrity.py
+if errorlevel 1 (
+  echo [ERROR] integrity embed failed
+  exit /b 1
+)
+
+echo [6/6] Verify packaged DLL hash...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\msi\verify_core_dll_hash.ps1"
 if errorlevel 1 (
   echo.

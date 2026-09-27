@@ -74,6 +74,10 @@ build/
 .claude/
 .claude/*
 
+# zcode (if you use it)
+.zcode/
+.zcode/*
+
 # ROM files (optional - if you have test ROMs, consider .gitignoring specific ones)
 # ROM 文件夹及所有内容
 /rom/
@@ -102,8 +106,11 @@ packaging/*
 
 logo/*
 
+# 品牌明文原件
+/src/images/
+
 scripts/msi/*
 scripts/msix/*
 
-# Signing keys (never commit private material)
+# Signing keys (never commit private material; release public key is published)
 /keys/*

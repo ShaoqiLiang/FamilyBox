@@ -1,107 +1,118 @@
 # FamilyBox
 
-FC/NES（红白机）模拟器。第一阶段目标：完整运行 **《超级马力欧兄弟》**（1985），含图形、音频和手柄输入。
+FC/NES（红白机）模拟器 —— **C++20 仿真核心**通过冻结、带版本握手的 C ABI 对外暴露，由 **Python / pygame-ce 桌面外壳**驱动（Windows）。
 
-仿真**核心用 C 实现**（CPU / PPU / APU / 总线 / Mapper）。Python + pygame 只做界面：窗口、输入、呈现、音频排队。
+目标：在真实的主机时序（NTSC 和 PAL）下完整运行 **《超级马力欧兄弟》**（1985），含图形、音频和手柄输入。
 
 > [English](README.md)
 
+## 亮点
+
+- C++20 实现的真实 6502 / PPU / APU 仿真 —— NTSC 60.0988 fps、PAL 50.007 fps（音频时钟节拍，非墙钟 tick）
+- 连续音频：160 ms 分块 × 单槽队列 —— 20 秒拷机**丢样 0、欠载 0**（验收线 < 0.1%）
+- 原生 Win32 菜单栏，支持**运行时载入 ROM**（无需重启）；不带 ROM 参数启动则打开卡带加载界面
+- 中英双语界面
+- 稳定 C ABI（`nes_abi_version` 握手、只增不改）—— 外壳与核心独立演进
+- 质量门禁开发：blargg CPU 测试 ROM、金帧 / 调色板 / 音准基线、mypy 严格模式 + ruff、clang-format
+
 ## 功能特性
 
-- **MOS 6502 CPU** — 13 种寻址模式、官方指令、NMI/RESET
-- **PPU** — 背景 + 精灵（8x8 / 8x16）、滚动、精灵 0 碰撞、VBlank NMI
-- **APU** — 2 脉冲 + 1 三角 + 1 噪声；NES 混音公式；约 44100 Hz 采样
-- **卡带** — iNES 解析，Mapper 0（NROM）
-- **输入** — 键盘映射 NES 手柄
+### 仿真核心（C++20 → `familybox_core.dll`）
 
-## 环境要求
+- **MOS 6502 CPU** — 官方指令集、13 种寻址模式、NMI / RESET / IRQ
+- **PPU** — 背景 + 精灵（8×8 / 8×16）、滚动、精灵 0 碰撞、VBlank NMI
+- **APU** — 2 脉冲 + 1 三角 + 1 噪声声道；NES 混音公式；约 44.1 kHz PCM
+- **卡带** — iNES 解析，**Mapper 0（NROM）** + 工作 RAM（`$6000–$7FFF`）
+- **区域感知时序** — APU/定时器周期随所选区域变化（`--region ntsc|pal`）
+- 经 ABI 暴露调试面 — PC/寄存器访问、PPU 状态/控制/掩码、调色板与 OAM 转储
 
-- Python 3.14+
-- [uv](https://docs.astral.sh/uv/)
-- C 编译器（gcc / MinGW）
+> **兼容性说明**：目前仅支持 Mapper 0（NROM）游戏（《超级马力欧兄弟》等）。
 
-## 编译 C 核心
+### 桌面外壳（Python 3.14 + pygame-ce）
 
-```bash
-# Windows (MinGW)
-familybox\build.bat
+- 窗口化模拟器：原生 Win32 菜单栏、应用内载入 ROM
+- 中英双语界面（内置本地化）
+- 零拷贝视频路径 —— `nes_video()` 共享帧缓冲，无额外拷贝
+- 无头模式供测试；`[FB]/[PY]` 调试日志与逐写入 C 跟踪模式
 
-# Linux / macOS
-chmod +x familybox/build.sh
-./familybox/build.sh
-```
+## 快速开始（Windows）
 
-生成 `familybox/familybox_core.dll`（Windows）或 `.so` / `.dylib`。
+环境要求：Python 3.14+、[uv](https://docs.astral.sh/uv/)、MinGW-w64 `gcc` + CMake。
 
-## 安装
-
-```bash
+```bat
 git clone https://github.com/ShaoqiLiang/FamilyBox.git
 cd FamilyBox
 uv sync
-familybox\build.bat   # 或 ./familybox/build.sh
+scripts\build.bat      :: 编译 C 核心 -> src\window\familybox_core.dll
+run.bat                :: 重新编译并启动（默认 ROM：rom\super-mario-bros-ntsc.nes）
 ```
 
-你还需要一个 `.nes` ROM 文件（如 `super-mario-bros.nes`）。
+其他运行方式：
 
-## 使用方法
-
-```bash
-# 运行模拟器
-uv run python main.py path/to/rom.nes
-
-# 无头模式
-uv run python main.py path/to/rom.nes --headless
-
-# 日志级别
-uv run python main.py path/to/rom.nes --log-level DEBUG
+```bat
+run.bat release path\to\rom.nes   :: 自定义 ROM（路径不能含 ! 或 '）
+run.bat headless                  :: 无窗口（测试用）
+run.bat debug                     :: 调试日志（[FB]/[PY]）
 ```
+
+PAL 卡带（欧版 ROM，312 行 / 50.007 fps / 1.66 MHz CPU）：
+
+```bat
+set "PYTHONPATH=src" && uv run python -m window.main path\to\rom.nes --region pal
+```
+
+判断 ROM 区域请看哈希值，不要看文件名。
 
 ### 键盘映射
 
-| 按键         | NES 按钮 |
-|--------------|----------|
-| Z            | A        |
-| X            | B        |
-| 右 Shift     | Select   |
-| 回车         | Start    |
-| 方向键       | 十字键   |
+| 按键              | NES 按钮   |
+|-------------------|------------|
+| 方向键 / WASD     | 十字键     |
+| Space / Z / N / J | A（跳跃）  |
+| M / K             | B（奔跑）  |
+| Enter / Tab       | Start      |
 
 ## 项目结构
 
 ```
-FamilyBox/
-├── main.py                  # 入口
-├── familybox/
-│   ├── main.py              # CLI
-│   ├── nes.py               # pygame 壳
-│   ├── core_api.py          # ctypes 绑定
-│   ├── familybox_core.dll
-│   ├── build.bat / build.sh
-│   ├── include/
-│   │   ├── familybox.h      # 对外 C API
-│   │   └── nes_internal.h
-│   ├── nes.c
-│   ├── cpu/cpu.c
-│   ├── ppu/ppu.c
-│   ├── apu/apu.c
-│   └── bus/bus.c
-├── tests/
-├── rom/
-└── doc/
+src/core/     C++20 仿真核心（nes / cpu / ppu / apu / bus）→ familybox_core.dll
+src/window/   Python 外壳：ctypes 绑定、会话层（音频泵 + 节拍）、
+              pygame 前端、原生菜单栏、本地化、CLI
+src/images/   品牌素材
+tests/        pytest 测试套件 —— blargg CPU ROM、金帧 / 调色板 / 音准基线
+scripts/      build.bat（CMake + MinGW）、build.sh、打包辅助
 ```
 
-## 架构
+### 架构
 
 ```
-Python (pygame)                 C 核心
-┌────────────────────┐         ┌─────────────────────────┐
-│ 窗口 / 事件        │ ──────► │ nes_set_buttons         │
-│ nes_run_frame()    │ ◄────── │ CPU+PPU+APU 跑完整一帧  │
-│ blit + 音频 queue  │         │ RGB + PCM               │
-└────────────────────┘         └─────────────────────────┘
+Python 外壳 (src/window)                C 核心 (src/core)
+┌────────────────────────┐    C ABI   ┌─────────────────────────┐
+│ pygame 前端 (L5)       │ ─────────► │ nes_set_buttons         │
+│ 会话层：节拍、音频     │            │ nes_run_frame（跑一帧） │
+│ ctypes 绑定 (L3)       │ ◄───────── │ nes_video（零拷贝）     │
+└────────────────────────┘            └─────────────────────────┘
+       一帧 = RGB 256×240 + PCM @ ~44.1 kHz，由音频时钟节拍
 ```
+
+## 发行完整性
+
+发行物使用长期 RSA 发行密钥签名：`scripts/sign_release.py` 产出哈希清单（`<文件>.sha256`）
+与 RSA-PSS/SHA-256 签名（`<文件>.sha256.sig`），随发行物一同发布。下载后验证：
+
+```bat
+uv run python scripts\verify_release.py <下载的文件或目录>
+```
+
+验证脚本会打印所用公钥的指纹，必须与下面一致：
+
+```
+SHA256:D8AC:78BF:A2EE:4FBA:80A2:66A9:2BE3:CBFE:C8A7:24AC:D96D:68C7:4D93:6FE5:DA2B:DD5C
+```
+
+公钥：[`keys/release_public.pem`](keys/release_public.pem)（已入库）。私钥从不离开维护者本机。
+该签名清单证明出处与完整性，独立于 Windows Authenticode——MSI 本体不签名。
 
 ## 许可证
 
-见 [LICENSE](LICENSE)。
+基于 [GNU AGPL-3.0](LICENSE) 分发。

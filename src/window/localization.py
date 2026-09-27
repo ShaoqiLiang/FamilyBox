@@ -36,6 +36,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "set.keys": "按键设置...",
         "help.keys": "按键说明...",
         "help.about": "关于 FamilyBox...",
+        "help.verify": "完整性验证...(&V)",
+        "help.update": "检查更新...(&U)",
         # 对话框
         "dlg.keys.title": "按键说明",
         "dlg.keys.body": (
@@ -51,13 +53,39 @@ STRINGS: dict[str, dict[str, str]] = {
             "ESC：退出全屏/最大化"
         ),
         "dlg.about.title": "关于 FamilyBox",
+        "dlg.ok": "确定",
+        "dlg.copy": "复制",
+        "dlg.cancel": "取消",
         "dlg.about.body": (
-            "FamilyBox v0.1.0\n"
+            "FamilyBox v{ver}\n"
             "FC/NES 模拟器（C++20 核心 + Python 界面）\n"
             "作者：ShaoqiLiang\n"
+            "GitHub：https://github.com/ShaoqiLiang/FamilyBox\n"
+            "构建日期：{build}\n"
+            "构建 Commit：{commit}\n"
             "\n"
             "请使用自备的合法卡带转储文件。"
         ),
+        "build.commit.dev": "开发模式（源码）",
+        "dlg.verify.title": "完整性验证",
+        "dlg.verify.progress": "正在验证完整性…",
+        "dlg.verify.ok": (
+            "验证通过：{n} 个文件与构建清单一致。\n"
+            "签名密钥指纹：\n{fp}\n"
+            "\n"
+            "请与 README 公布的指纹核对一致。"
+        ),
+        "dlg.verify.fail": (
+            "验证未通过（{n} 处）：\n{problems}\n"
+            "\n"
+            "签名密钥指纹：{fp}\n"
+            "若非你本人操作，请从官方 GitHub 重新下载。"
+        ),
+        "dlg.verify.unsigned": "当前为开发/未打包版本，无嵌入完整性清单。",
+        "dlg.update.title": "检查更新",
+        "dlg.update.latest": "已是最新版本（{cur}）。",
+        "dlg.update.found": "发现新版本：{latest}（当前 {cur}）。\n是否打开发布页下载？",
+        "dlg.update.error": "检查更新失败：\n{err}",
         "dlg.loadfail.title": "载入失败",
         "dlg.loadfail.body": "无法载入该文件（可能是不支持的 mapper 或损坏的文件）：\n{path}",
         # 对话框（英文菜单时也用英文文案键）
@@ -110,6 +138,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "set.keys": "Key Mapping...",
         "help.keys": "&Controls...",
         "help.about": "&About FamilyBox...",
+        "help.verify": "&Verify Integrity...",
+        "help.update": "&Check for Updates...",
         "dlg.keys.title": "Controls",
         "dlg.keys.body": (
             "Arrows / WASD: move\n"
@@ -124,14 +154,40 @@ STRINGS: dict[str, dict[str, str]] = {
             "ESC: leave fullscreen/maximized"
         ),
         "dlg.about.title": "About FamilyBox",
+        "dlg.ok": "OK",
+        "dlg.copy": "Copy",
+        "dlg.cancel": "Cancel",
         "dlg.about.body": (
-            "FamilyBox v0.1.0\n"
+            "FamilyBox v{ver}\n"
             "FC/NES emulator (C++20 core + Python UI)\n"
             "Author: ShaoqiLiang\n"
+            "GitHub: https://github.com/ShaoqiLiang/FamilyBox\n"
+            "Build date: {build}\n"
+            "Build commit: {commit}\n"
             "\n"
             "Please use your own legally dumped cartridges.\n"
             "For learning and personal use only."
         ),
+        "build.commit.dev": "development (source)",
+        "dlg.verify.title": "Integrity Verification",
+        "dlg.verify.progress": "Verifying integrity…",
+        "dlg.verify.ok": (
+            "Verification passed: {n} files match the build manifest.\n"
+            "Signing key fingerprint:\n{fp}\n"
+            "\n"
+            "Please compare it with the fingerprint published in the README."
+        ),
+        "dlg.verify.fail": (
+            "Verification FAILED ({n} issue(s)):\n{problems}\n"
+            "\n"
+            "Signing key fingerprint: {fp}\n"
+            "If this wasn't you, re-download from the official GitHub releases."
+        ),
+        "dlg.verify.unsigned": "Development/unpackaged build — no embedded integrity manifest.",
+        "dlg.update.title": "Check for Updates",
+        "dlg.update.latest": "Already up to date ({cur}).",
+        "dlg.update.found": "New version available: {latest} (current {cur}).\nOpen the releases page to download?",
+        "dlg.update.error": "Update check failed:\n{err}",
         "dlg.loadfail.title": "Load Failed",
         "dlg.loadfail.body": "Cannot load this file (unsupported mapper or corrupt):\n{path}",
         "osd.loaded": "Loaded {name}",

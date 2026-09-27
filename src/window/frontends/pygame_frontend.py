@@ -15,9 +15,13 @@ import pygame
 from window.binding.core_api import _LIB_PATH
 from window.frontends.menu_bar import Action, MenuBar
 from window.localization import tr
+from window.resources import asset_path, get_version
 from window.session import EmulationSession
+from window.splash import play_logo_video
 
 FB_MENU = pygame.event.custom_type()
+# 关于框自定义按钮 ID(TaskDialogIndirect 自定义按钮,避开系统 ID 1-11)
+ID_ABOUT_COPY, ID_ABOUT_OK = 1001, 1002
 
 log = logging.getLogger(__name__)
 
@@ -175,7 +179,10 @@ class NES:
 
         if not headless:
             pygame.init()
+            self._apply_window_icon()  # set_mode 前注入图标，避免任务栏闪默认色块
+            self._play_intro_splash()  # 独立无边框动画窗（PyCharm 式），内含 display 重建
             self._screen = pygame.display.set_mode(_WINDOW_SIZE, pygame.RESIZABLE)
+            self._apply_window_icon()  # display 重建后重设图标
             pygame.display.set_caption("FamilyBox -Auth:ShaoqiLiang")
             self._enable_file_drop()
             # 关闭文本输入：pygame 默认开启它，中文 IME 会拦截字母键并把
@@ -215,13 +222,41 @@ class NES:
             pygame.display.set_caption(f"FamilyBox — {Path(rom_path).name}")
 
         if not headless:
-            info = pygame.display.get_wm_info()
-            hwnd = info.get("hwnd") or info.get("window") or 0
-            if isinstance(hwnd, str):  # pygame-ce returns hex string
-                hwnd = int(hwnd, 16) if hwnd.startswith("0x") else int(hwnd)
             self._menu.attach(
-                hwnd, self._lang, self._menu_state(), self._dispatch_menu, FB_MENU
+                self._get_hwnd(),
+                self._lang,
+                self._menu_state(),
+                self._dispatch_menu,
+                FB_MENU,
             )
+
+    def _apply_window_icon(self) -> None:
+        """窗口/任务栏图标（D1）。SDL 图标是 per-window 属性，display 重建后
+        必须重设；明文由 prepare/打包环节产出，缺失只降级，绝不阻断启动。"""
+        if self._headless:
+            return
+        try:
+            icon = pygame.image.load(str(asset_path("assets/icon.png")))
+            pygame.display.set_icon(icon)
+        except (OSError, ValueError, pygame.error) as e:
+            log.warning("window icon unavailable: %s", e)
+
+    def _play_intro_splash(self) -> None:
+        """A1：启动动画——独立无边框窗播放 logo（PyCharm 式），结束后重建
+        display 供主窗使用；自动化/测试环境（pytest、SDL dummy）与任何失败
+        都静默跳过；播放中关窗则置 _running=False 正常退出。"""
+        if "pytest" in sys.modules or os.environ.get("SDL_VIDEODRIVER") == "dummy":
+            return
+        try:
+            if not play_logo_video(asset_path("assets/logo.webm")):
+                self._running = False  # 播放中关窗 → 直接退出
+                return
+        except Exception as e:
+            log.warning("intro splash skipped: %s", e)
+            return
+        # 动画窗（NOFRAME）→ 主窗样式变化，display 必须重建
+        pygame.display.quit()
+        pygame.display.init()
 
     def _open_run_log(self, mode: str, rom_path: str | None) -> Path | None:
         """Append-only log under build/log. Always created so runs are comparable."""
@@ -335,10 +370,7 @@ class NES:
         buf = ctypes.create_unicode_buffer(512)
         ofn = OPENFILENAMEW()
         ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
-        try:
-            ofn.hwndOwner = pygame.display.get_wm_info()["hwnd"]
-        except KeyError, pygame.error:
-            ofn.hwndOwner = None
+        ofn.hwndOwner = self._get_hwnd() or None
         ofn.lpstrFilter = "NES 卡带 (*.nes)\0*.nes\0所有文件 (*.*)\0*.*\0"
         ofn.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)
         ofn.nMaxFile = len(buf)
@@ -365,11 +397,13 @@ class NES:
             )
 
     @staticmethod
-    def _message_box(title: str, text: str) -> None:
+    def _message_box(title: str, text: str, flags: int = 0x10) -> int:
         if sys.platform == "win32":
             import ctypes
 
-            ctypes.windll.user32.MessageBoxW(None, text, title, 0x10)  # MB_ICONERROR
+            # 默认 MB_ICONERROR；返回值为被点按钮 ID（MB_YESNO 用）
+            return int(ctypes.windll.user32.MessageBoxW(None, text, title, flags))
+        return 0
 
     # -- menu actions (same handlers as hotkeys) --
 
@@ -383,8 +417,7 @@ class NES:
         }
 
     def _rebuild_menu(self) -> None:
-        hwnd = pygame.display.get_wm_info().get("hwnd", 0)
-        self._menu.rebuild(hwnd, self._lang, self._menu_state())
+        self._menu.rebuild(self._get_hwnd(), self._lang, self._menu_state())
 
     def _dispatch_menu(self, action: int, extra: dict[str, object]) -> None:
         try:
@@ -436,9 +469,156 @@ class NES:
                 tr(self._lang, "dlg.keys.title"), tr(self._lang, "dlg.keys.body")
             )
         elif act == Action.ABOUT:
-            self._message_box(
-                tr(self._lang, "dlg.about.title"), tr(self._lang, "dlg.about.body")
+            from window.integrity import build_commit
+
+            title = tr(self._lang, "dlg.about.title")
+            full = tr(
+                self._lang,
+                "dlg.about.body",
+                build=self._build_date(),
+                ver=get_version(),
+                commit=build_commit() or tr(self._lang, "build.commit.dev"),
             )
+            head, _, content = full.partition("\n")  # 首行作 TaskDialog 主指令
+            buttons = [
+                (ID_ABOUT_COPY, tr(self._lang, "dlg.copy")),
+                (ID_ABOUT_OK, tr(self._lang, "dlg.ok")),
+            ]
+            from window.frontends.task_dialog import show_task_dialog
+
+            clicked = show_task_dialog(
+                self._get_hwnd(),
+                title,
+                main_instruction=head,
+                content=content,
+                buttons=buttons,
+                default_button_id=ID_ABOUT_OK,
+                error_icon=True,
+                copy_button_id=ID_ABOUT_COPY,
+                debug=self._debug,
+            )
+            if clicked == ID_ABOUT_COPY:
+                self._copy_to_clipboard(full)
+            elif clicked == -1:  # TaskDialog 不可用 → 原始消息框兜底
+                self._message_box(title, full)
+        elif act == Action.VERIFY_INTEGRITY:
+            self._verify_integrity()
+        elif act == Action.CHECK_UPDATE:
+            self._check_updates()
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        from window.frontends.task_dialog import copy_to_clipboard
+
+        copy_to_clipboard(self._get_hwnd(), text, debug=self._debug)
+
+    def _verify_integrity(self) -> None:
+        """帮助菜单「完整性验证」(S2a)：原生进度对话框 + 结果弹窗。"""
+        from window.frontends.task_dialog import show_progress_dialog
+        from window.integrity import verify_installation
+
+        def work(report_progress: Callable[[int], None]) -> Any:
+            def to_pct(done: int, total: int) -> None:
+                if total > 0:
+                    report_progress(min(100, int(done * 100 / total)))
+
+            return verify_installation(progress=to_pct)
+
+        _clicked, report = show_progress_dialog(
+            self._get_hwnd(),
+            title=tr(self._lang, "dlg.verify.title"),
+            heading=tr(self._lang, "dlg.verify.progress"),
+            work=work,
+            cancel_text=tr(self._lang, "dlg.cancel"),
+            debug=self._debug,
+        )
+        if report is not None:
+            self._show_verify_result(report)
+
+    def _show_verify_result(self, report: Any) -> None:
+        title = tr(self._lang, "dlg.verify.title")
+        if report.status == "unsigned":
+            self._message_box(title, tr(self._lang, "dlg.verify.unsigned"), 0x40)
+            return
+        if report.status == "ok":
+            self._message_box(
+                title,
+                tr(
+                    self._lang,
+                    "dlg.verify.ok",
+                    n=report.files_checked,
+                    fp=report.fingerprint,
+                ),
+                0x40,
+            )
+            return
+        shown = report.problems[:8]
+        lines = list(shown)
+        if len(report.problems) > len(shown):
+            lines.append(f"... +{len(report.problems) - len(shown)}")
+        self._message_box(
+            title,
+            tr(
+                self._lang,
+                "dlg.verify.fail",
+                n=len(report.problems),
+                problems="\n".join(lines),
+                fp=report.fingerprint,
+            ),
+        )
+
+    def _check_updates(self) -> None:
+        """帮助菜单「检查更新」(S4)：GitHub Releases 比对，询问打开发布页。"""
+        import webbrowser
+
+        from window.update_check import RELEASES_PAGE, fetch_latest
+
+        report = fetch_latest(get_version())
+        title = tr(self._lang, "dlg.update.title")
+        if report.error is not None:
+            self._message_box(
+                title, tr(self._lang, "dlg.update.error", err=report.error), 0x30
+            )
+            return
+        if not report.has_update:
+            self._message_box(
+                title, tr(self._lang, "dlg.update.latest", cur=report.current), 0x40
+            )
+            return
+        clicked = self._message_box(
+            title,
+            tr(
+                self._lang,
+                "dlg.update.found",
+                latest=report.latest,
+                cur=report.current,
+            ),
+            0x24,  # MB_ICONQUESTION | MB_YESNO
+        )
+        if clicked == 6:  # IDYES
+            webbrowser.open(RELEASES_PAGE)
+
+    def _get_hwnd(self) -> int:
+        """取主窗口句柄(F1):兼容 int / 十六进制串 / 'window' 键,缺失归 0。
+
+        _rebuild_menu 曾直接 get("hwnd", 0)——pygame-ce 部分版本返回
+        十六进制串,SetMenu(0) 静默失败,实机表现为菜单勾选/语言永不刷新。
+        """
+        info = pygame.display.get_wm_info()
+        hwnd = info.get("hwnd") or info.get("window") or 0
+        if isinstance(hwnd, str):
+            hwnd = int(hwnd, 16) if hwnd.startswith("0x") else int(hwnd)
+        return int(hwnd)
+
+    @staticmethod
+    def _build_date() -> str:
+        """构建日期:冻结取 exe 修改时间,开发取核心 DLL 修改时间。"""
+        from datetime import datetime
+
+        target = Path(sys.executable) if getattr(sys, "frozen", False) else _LIB_PATH
+        try:
+            return datetime.fromtimestamp(target.stat().st_mtime).strftime("%Y-%m-%d")
+        except OSError:
+            return "unknown"
 
     def _toggle_fullscreen(self) -> None:
         self._fullscreen = not self._fullscreen
@@ -452,6 +632,7 @@ class NES:
                 (_FRAME_SIZE[0] * self._scale, _FRAME_SIZE[1] * self._scale),
                 pygame.RESIZABLE,
             )
+        self._apply_window_icon()
         pygame.key.stop_text_input()
         self._enable_file_drop()
         self._rebuild_menu()
@@ -634,6 +815,7 @@ class NES:
         pygame.display.quit()
         pygame.display.init()
         self._screen = pygame.display.set_mode(desktop, pygame.NOFRAME)
+        self._apply_window_icon()
         pygame.key.stop_text_input()  # 重建显示后 pygame 会再次开启
         self._maximized = True
 
@@ -644,6 +826,7 @@ class NES:
         pygame.display.quit()
         pygame.display.init()
         self._screen = pygame.display.set_mode(_WINDOW_SIZE, pygame.RESIZABLE)
+        self._apply_window_icon()
         self._maximized = False
 
     def close(self) -> None:

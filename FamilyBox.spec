@@ -5,7 +5,7 @@ a = Analysis(
     ['src/window/main.py'],
     pathex=['src'],
     binaries=[('src/window/familybox_core.dll', 'familybox')],
-    datas=[],
+    datas=[('build/assets', 'assets'), ('src/window/assets/GitHub_Lockup_Black.png', 'assets'), ('src/Version.ini', '.')],
     hiddenimports=['pygame'],
     hookspath=[],
     hooksconfig={},
@@ -32,6 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['build/assets/familybox.ico'],
 )
 coll = COLLECT(
     exe,

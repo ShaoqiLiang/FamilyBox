@@ -72,6 +72,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem decrypt branded assets to build\assets (key: keys\logo_private, local only;
+rem missing key is non-fatal - window icon / intro splash degrade gracefully)
+uv run python scripts\prepare_assets.py >nul 2>&1
+if errorlevel 1 echo [WARN] asset decrypt skipped
+
 rem clear inherited debug/trace flags so a release run stays quiet
 set FAMILYBOX_DEBUG=
 set FAMILYBOX_TRACE=

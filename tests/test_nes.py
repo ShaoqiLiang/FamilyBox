@@ -10,6 +10,7 @@ import pytest
 
 from window.frontends.menu_bar import Action
 from window.frontends.pygame_frontend import NES
+from window.resources import get_version
 
 ROM_PATH = "rom/super-mario-bros.nes"
 
@@ -356,15 +357,142 @@ class TestMenuActions:
         assert n._screen.get_size() == (512, 480)
         n.close()
 
-    def test_help_dialogs_route_through_message_box(
+    def test_keys_help_routes_through_message_box(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         n = NES(ROM_PATH)
         boxes: list[tuple[str, str]] = []
         monkeypatch.setattr(n, "_message_box", lambda t, x: boxes.append((t, x)))
         self._dispatch(n, Action.KEYS_HELP)
-        self._dispatch(n, Action.ABOUT)
-        assert len(boxes) == 2
+        assert len(boxes) == 1
         assert boxes[0][0] == "按键说明"
-        assert "FamilyBox" in boxes[1][0]
         n.close()
+
+    def test_about_shows_task_dialog_and_copy_copies_body(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """[复制] 返回时,About 全文(含仓库地址与构建日期)应写入剪贴板。"""
+        from window.frontends import task_dialog
+        from window.frontends.pygame_frontend import ID_ABOUT_COPY
+
+        n = NES(ROM_PATH)
+        shown: list[tuple[str, str, str, list[tuple[int, str]]]] = []
+        copied: list[str] = []
+
+        def fake_show(
+            owner: int,
+            title: str,
+            main_instruction: str,
+            content: str,
+            buttons: list[tuple[int, str]],
+            default_button_id: int,
+            error_icon: bool = False,
+            copy_button_id: int | None = None,
+            debug: bool = False,
+        ) -> int:
+            shown.append((title, main_instruction, content, buttons))
+            return ID_ABOUT_COPY
+
+        monkeypatch.setattr(task_dialog, "show_task_dialog", fake_show)
+        monkeypatch.setattr(n, "_copy_to_clipboard", lambda t: copied.append(t))
+        self._dispatch(n, Action.ABOUT)
+        assert shown and shown[0][0] == "关于 FamilyBox"
+        assert (
+            shown[0][1] == f"FamilyBox v{get_version()}"
+        )  # 主指令版本来自 src/Version.ini
+        assert "构建日期" in shown[0][2]
+        assert "https://github.com/ShaoqiLiang/FamilyBox" in shown[0][2]
+        assert copied and "https://github.com/ShaoqiLiang/FamilyBox" in copied[0]
+        assert f"FamilyBox v{get_version()}" in copied[0]
+        n.close()
+
+
+class TestWindowIcon:
+    """D1：图标注入时序——set_mode 前首设，display 重建后重设。"""
+
+    @staticmethod
+    def _ensure_decrypted_icon() -> None:
+        """运行时只读明文——测试现场把 icon.png.enc 解密到 build/assets。"""
+        import sys
+
+        repo = Path(__file__).resolve().parents[1]
+        sys.path.insert(0, str(repo / "scripts"))
+        from fbenc import decrypt_bytes
+
+        from window.resources import asset_path
+
+        enc = asset_path("assets/icon.png.enc")
+        out = repo / "build" / "assets" / "icon.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(decrypt_bytes(enc.read_bytes()))
+
+    def test_icon_set_before_set_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._ensure_decrypted_icon()
+        calls: list[str] = []
+        real_set_mode = pygame.display.set_mode
+
+        def fake_set_mode(*a: object, **k: object) -> pygame.Surface:
+            calls.append("set_mode")
+            return real_set_mode(*a, **k)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(pygame.display, "set_mode", fake_set_mode)
+        monkeypatch.setattr(
+            pygame.display, "set_icon", lambda s: calls.append("set_icon")
+        )
+        n = NES(ROM_PATH, headless=False)
+        n.close()
+        assert "set_icon" in calls and "set_mode" in calls
+        assert calls.index("set_icon") < calls.index("set_mode")
+
+    def test_icon_reapplied_after_maximize(
+        self, windowed_nes: NES, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._ensure_decrypted_icon()
+        calls: list[int] = []
+        monkeypatch.setattr(pygame.display, "set_icon", lambda s: calls.append(1))
+        pygame.event.post(pygame.event.Event(pygame.WINDOWMAXIMIZED))
+        windowed_nes._handle_events()
+        assert len(calls) >= 1
+
+    def test_headless_never_touches_icon(self, nes: NES) -> None:
+        # headless 构造已完成——能走到这里即说明无显示操作；图标方法自身也须直通
+        nes._apply_window_icon()  # 不抛即通过
+        assert nes._screen is None
+
+
+class TestGetHwnd:
+    """F1:get_wm_info 三态兼容（int / 十六进制串 / 'window' 键），缺失归 0。"""
+
+    @pytest.mark.parametrize(
+        "info,expected",
+        [
+            ({"hwnd": 8198}, 8198),
+            ({"hwnd": "0x2006"}, 0x2006),
+            ({"window": 4100}, 4100),
+            ({"hwnd": 0, "window": 0}, 0),
+            ({}, 0),
+        ],
+    )
+    def test_get_hwnd_normalizes(
+        self,
+        windowed_nes: NES,
+        monkeypatch: pytest.MonkeyPatch,
+        info: dict,
+        expected: int,
+    ) -> None:
+        monkeypatch.setattr(pygame.display, "get_wm_info", lambda: info)
+        assert windowed_nes._get_hwnd() == expected
+
+    def test_rebuild_menu_gets_normalized_hwnd(
+        self, windowed_nes: NES, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F1 回归钉子:_rebuild_menu 必须拿到规范化后的 int 句柄。"""
+        seen: list[int] = []
+        monkeypatch.setattr(
+            windowed_nes._menu,
+            "rebuild",
+            lambda hwnd, lang, state: seen.append(hwnd),
+        )
+        monkeypatch.setattr(pygame.display, "get_wm_info", lambda: {"hwnd": "0x2006"})
+        windowed_nes._rebuild_menu()
+        assert seen and seen[-1] == 0x2006

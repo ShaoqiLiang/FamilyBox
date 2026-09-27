@@ -33,20 +33,6 @@ static int bg_pattern(const Ppu *p) { return (p->ctrl & 0x10) ? 0x1000 : 0; }
 static int sp_pattern(const Ppu *p) { return (p->ctrl & 0x08) ? 0x1000 : 0; }
 static int sp_height(const Ppu *p) { return (p->ctrl & 0x20) ? 16 : 8; }
 
-static void inc_hori(Nes *n)
-{
-    Ppu *p = &n->ppu;
-    if ((p->v & 0x001F) == 31)
-    {
-        p->v &= (uint16_t)~0x001F;
-        p->v ^= 0x0400;
-    }
-    else
-    {
-        p->v++;
-    }
-}
-
 static void inc_vert(Nes *n)
 {
     Ppu *p = &n->ppu;
