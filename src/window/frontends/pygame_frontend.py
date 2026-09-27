@@ -178,6 +178,7 @@ class NES:
         self._scale = 3
         self._menu = MenuBar()
         self._verify_job: dict[str, Any] | None = None  # S2a 完整性验证后台任务
+        self._verify_veil: pygame.Surface | None = None  # 遮罩缓存（尺寸变化才重建）
 
         if not headless:
             pygame.init()
@@ -533,38 +534,39 @@ class NES:
         threading.Thread(target=work, daemon=True, name="fb-verify").start()
 
     def _poll_verify_job(self) -> None:
-        """主循环每帧调用：验证进行中画遮罩进度条；结束后清场并弹结果框。"""
+        """主循环每帧调用：验证结束即清场并弹结果框（遮罩由 _present* 合成）。"""
         job = self._verify_job
-        if job is None:
-            return
-        self._draw_verify_overlay(int(job["done"]), int(job["total"]))
-        if job["report"] is not None:
+        if job is not None and job["report"] is not None:
             self._verify_job = None
             self._show_verify_result(job["report"])
 
-    def _draw_verify_overlay(self, done: int, total: int) -> None:
-        if self._screen is None or self._font is None:
+    def _compose_verify_overlay(self, surface: pygame.Surface) -> None:
+        """把进度遮罩合成进当前帧——在 _present* 的 flip 之前调用。
+
+        不能自翻屏：_present 已 flip 过一次再翻会以帧率闪烁（2026-09-28 踩坑）。
+        """
+        if self._font is None:
             return
-        w, h = self._screen.get_size()
-        veil = pygame.Surface((w, h), pygame.SRCALPHA)
-        veil.fill((8, 12, 24, 160))
-        self._screen.blit(veil, (0, 0))
+        w, h = surface.get_size()
+        if self._verify_veil is None or self._verify_veil.get_size() != (w, h):
+            self._verify_veil = pygame.Surface((w, h), pygame.SRCALPHA)
+            self._verify_veil.fill((8, 12, 24, 160))
+        surface.blit(self._verify_veil, (0, 0))
         bw, bh = min(480, w - 80), 22
         bx, by = (w - bw) // 2, h // 2 - 40
-        pygame.draw.rect(
-            self._screen, (96, 108, 140), (bx - 2, by - 2, bw + 4, bh + 4), 2
-        )
+        pygame.draw.rect(surface, (96, 108, 140), (bx - 2, by - 2, bw + 4, bh + 4), 2)
+        job = self._verify_job or {}
+        done, total = int(job.get("done", 0)), int(job.get("total", 0))
         pct = 0 if total <= 0 else max(0.0, min(1.0, done / total))
         if pct > 0:
-            fill = pygame.Surface((max(1, int(bw * pct)), bh))
-            fill.fill((110, 200, 120))
-            self._screen.blit(fill, (bx, by))
+            pygame.draw.rect(
+                surface, (110, 200, 120), (bx, by, max(1, int(bw * pct)), bh)
+            )
         label = tr(self._lang, "dlg.verify.progress")
         if total > 0:
             label += f"  {pct * 100:.0f}%"
         img = self._font.render(label, True, (220, 224, 236))
-        self._screen.blit(img, img.get_rect(midbottom=(w // 2, by - 12)))
-        pygame.display.flip()
+        surface.blit(img, img.get_rect(midbottom=(w // 2, by - 12)))
 
     def _show_verify_result(self, report: Any) -> None:
         title = tr(self._lang, "dlg.verify.title")
@@ -688,6 +690,8 @@ class NES:
                     center=(self._screen.get_width() // 2, 200 + i * 44)
                 )
                 self._screen.blit(img, rect)
+        if self._verify_job is not None and self._screen is not None:
+            self._compose_verify_overlay(self._screen)
         pygame.display.flip()
 
     def _debug_dump(self) -> None:
@@ -835,6 +839,8 @@ class NES:
                 self._screen.blit(img, (12, self._screen.get_height() - 40))
             else:
                 self._osd_text = None
+        if self._verify_job is not None and self._screen is not None:
+            self._compose_verify_overlay(self._screen)
         pygame.display.flip()
 
     def _enter_maximized(self) -> None:
