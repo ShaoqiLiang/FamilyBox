@@ -1,6 +1,7 @@
 """A1 启动动画测试：真实视频在 SDL dummy 下全链路播放 + 缺文件降级。
 
 明文视频由本测试现场解密到临时目录（运行时本身只读明文路径）。
+play_logo_video 自建无边框 display（PyCharm 式），测试无需预建 screen。
 """
 
 from __future__ import annotations
@@ -27,37 +28,32 @@ def plain_video(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def dummy_screen(monkeypatch: pytest.MonkeyPatch) -> pygame.Surface:
+def dummy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
     if not pygame.get_init():
         pygame.init()
-    screen = pygame.display.set_mode((1024, 768))
-    yield screen
+    yield
     pygame.display.quit()
 
 
 class TestPlayLogoVideo:
     def test_full_playback_returns_true(
-        self, plain_video: Path, dummy_screen: pygame.Surface
+        self, plain_video: Path, dummy_env: None
     ) -> None:
         """解密产物 → H.264 解码 → 缩放 blit 全链路；fps 放开避免 wall-clock 等待。"""
-        assert play_logo_video(plain_video, dummy_screen, fps=1000) is True
+        assert play_logo_video(plain_video, fps=1000) is True
 
-    def test_user_skip_returns_true(
-        self, plain_video: Path, dummy_screen: pygame.Surface
-    ) -> None:
-        """第一帧后立即有按键事件 → 跳过并返回 True。"""
+    def test_user_skip_returns_true(self, plain_video: Path, dummy_env: None) -> None:
+        """首帧后立即有按键事件 → 跳过并返回 True。"""
         pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_SPACE))
-        assert play_logo_video(plain_video, dummy_screen, fps=1000) is True
+        assert play_logo_video(plain_video, fps=1000) is True
 
     def test_quit_during_playback_returns_false(
-        self, plain_video: Path, dummy_screen: pygame.Surface
+        self, plain_video: Path, dummy_env: None
     ) -> None:
         pygame.event.post(pygame.event.Event(pygame.QUIT))
-        assert play_logo_video(plain_video, dummy_screen, fps=1000) is False
+        assert play_logo_video(plain_video, fps=1000) is False
 
-    def test_missing_file_returns_true(
-        self, tmp_path: Path, dummy_screen: pygame.Surface
-    ) -> None:
+    def test_missing_file_returns_true(self, tmp_path: Path, dummy_env: None) -> None:
         """文件缺失 → 记日志跳过（返回 True），绝不阻断启动。"""
-        assert play_logo_video(tmp_path / "missing.webm", dummy_screen) is True
+        assert play_logo_video(tmp_path / "missing.webm") is True

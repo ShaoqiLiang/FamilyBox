@@ -180,7 +180,9 @@ class NES:
         if not headless:
             pygame.init()
             self._apply_window_icon()  # set_mode 前注入图标，避免任务栏闪默认色块
+            self._play_intro_splash()  # 独立无边框动画窗（PyCharm 式），内含 display 重建
             self._screen = pygame.display.set_mode(_WINDOW_SIZE, pygame.RESIZABLE)
+            self._apply_window_icon()  # display 重建后重设图标
             pygame.display.set_caption("FamilyBox -Auth:ShaoqiLiang")
             self._enable_file_drop()
             # 关闭文本输入：pygame 默认开启它，中文 IME 会拦截字母键并把
@@ -220,14 +222,13 @@ class NES:
             pygame.display.set_caption(f"FamilyBox — {Path(rom_path).name}")
 
         if not headless:
-            info = pygame.display.get_wm_info()
-            hwnd = info.get("hwnd") or info.get("window") or 0
-            if isinstance(hwnd, str):  # pygame-ce returns hex string
-                hwnd = int(hwnd, 16) if hwnd.startswith("0x") else int(hwnd)
             self._menu.attach(
-                hwnd, self._lang, self._menu_state(), self._dispatch_menu, FB_MENU
+                self._get_hwnd(),
+                self._lang,
+                self._menu_state(),
+                self._dispatch_menu,
+                FB_MENU,
             )
-            self._play_intro_splash()
 
     def _apply_window_icon(self) -> None:
         """窗口/任务栏图标（D1）。SDL 图标是 per-window 属性，display 重建后
@@ -241,17 +242,21 @@ class NES:
             log.warning("window icon unavailable: %s", e)
 
     def _play_intro_splash(self) -> None:
-        """A1：每次启动播放加密 logo 动画；自动化/测试环境（pytest、SDL
-        dummy）与任何失败都静默跳过；播放中关窗则置 _running=False 正常退出。"""
-        if self._screen is None or "pytest" in sys.modules:
-            return
-        if os.environ.get("SDL_VIDEODRIVER") == "dummy":
+        """A1：启动动画——独立无边框窗播放 logo（PyCharm 式），结束后重建
+        display 供主窗使用；自动化/测试环境（pytest、SDL dummy）与任何失败
+        都静默跳过；播放中关窗则置 _running=False 正常退出。"""
+        if "pytest" in sys.modules or os.environ.get("SDL_VIDEODRIVER") == "dummy":
             return
         try:
-            if not play_logo_video(asset_path("assets/logo.webm"), self._screen):
-                self._running = False
+            if not play_logo_video(asset_path("assets/logo.webm")):
+                self._running = False  # 播放中关窗 → 直接退出
+                return
         except Exception as e:
             log.warning("intro splash skipped: %s", e)
+            return
+        # 动画窗（NOFRAME）→ 主窗样式变化，display 必须重建
+        pygame.display.quit()
+        pygame.display.init()
 
     def _open_run_log(self, mode: str, rom_path: str | None) -> Path | None:
         """Append-only log under build/log. Always created so runs are comparable."""
@@ -365,10 +370,7 @@ class NES:
         buf = ctypes.create_unicode_buffer(512)
         ofn = OPENFILENAMEW()
         ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
-        try:
-            ofn.hwndOwner = pygame.display.get_wm_info()["hwnd"]
-        except KeyError, pygame.error:
-            ofn.hwndOwner = None
+        ofn.hwndOwner = self._get_hwnd() or None
         ofn.lpstrFilter = "NES 卡带 (*.nes)\0*.nes\0所有文件 (*.*)\0*.*\0"
         ofn.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)
         ofn.nMaxFile = len(buf)
@@ -415,8 +417,7 @@ class NES:
         }
 
     def _rebuild_menu(self) -> None:
-        hwnd = pygame.display.get_wm_info().get("hwnd", 0)
-        self._menu.rebuild(hwnd, self._lang, self._menu_state())
+        self._menu.rebuild(self._get_hwnd(), self._lang, self._menu_state())
 
     def _dispatch_menu(self, action: int, extra: dict[str, object]) -> None:
         try:
@@ -478,7 +479,7 @@ class NES:
             from window.frontends.task_dialog import show_task_dialog
 
             clicked = show_task_dialog(
-                self._current_hwnd(),
+                self._get_hwnd(),
                 title,
                 main_instruction=head,
                 content=content,
@@ -496,12 +497,17 @@ class NES:
     def _copy_to_clipboard(self, text: str) -> None:
         from window.frontends.task_dialog import copy_to_clipboard
 
-        copy_to_clipboard(self._current_hwnd(), text, debug=self._debug)
+        copy_to_clipboard(self._get_hwnd(), text, debug=self._debug)
 
-    def _current_hwnd(self) -> int:
+    def _get_hwnd(self) -> int:
+        """取主窗口句柄(F1):兼容 int / 十六进制串 / 'window' 键,缺失归 0。
+
+        _rebuild_menu 曾直接 get("hwnd", 0)——pygame-ce 部分版本返回
+        十六进制串,SetMenu(0) 静默失败,实机表现为菜单勾选/语言永不刷新。
+        """
         info = pygame.display.get_wm_info()
         hwnd = info.get("hwnd") or info.get("window") or 0
-        if isinstance(hwnd, str):  # pygame-ce returns hex string
+        if isinstance(hwnd, str):
             hwnd = int(hwnd, 16) if hwnd.startswith("0x") else int(hwnd)
         return int(hwnd)
 

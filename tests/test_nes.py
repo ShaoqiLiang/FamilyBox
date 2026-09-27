@@ -455,3 +455,41 @@ class TestWindowIcon:
         # headless 构造已完成——能走到这里即说明无显示操作；图标方法自身也须直通
         nes._apply_window_icon()  # 不抛即通过
         assert nes._screen is None
+
+
+class TestGetHwnd:
+    """F1:get_wm_info 三态兼容（int / 十六进制串 / 'window' 键），缺失归 0。"""
+
+    @pytest.mark.parametrize(
+        "info,expected",
+        [
+            ({"hwnd": 8198}, 8198),
+            ({"hwnd": "0x2006"}, 0x2006),
+            ({"window": 4100}, 4100),
+            ({"hwnd": 0, "window": 0}, 0),
+            ({}, 0),
+        ],
+    )
+    def test_get_hwnd_normalizes(
+        self,
+        windowed_nes: NES,
+        monkeypatch: pytest.MonkeyPatch,
+        info: dict,
+        expected: int,
+    ) -> None:
+        monkeypatch.setattr(pygame.display, "get_wm_info", lambda: info)
+        assert windowed_nes._get_hwnd() == expected
+
+    def test_rebuild_menu_gets_normalized_hwnd(
+        self, windowed_nes: NES, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F1 回归钉子:_rebuild_menu 必须拿到规范化后的 int 句柄。"""
+        seen: list[int] = []
+        monkeypatch.setattr(
+            windowed_nes._menu,
+            "rebuild",
+            lambda hwnd, lang, state: seen.append(hwnd),
+        )
+        monkeypatch.setattr(pygame.display, "get_wm_info", lambda: {"hwnd": "0x2006"})
+        windowed_nes._rebuild_menu()
+        assert seen and seen[-1] == 0x2006
